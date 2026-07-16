@@ -1,8 +1,48 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+dist/
+build/
 .pytest_cache/
 .ruff_cache/
 .venv/
+htmlcov/
+coverage.xml
+
+# Node.js
+node_modules/
 .pnpm-store/
-data/
+
+# Frontend build
+frontend/.next/
+frontend/out/
+frontend/.wrangler/
+
+# Environment & secrets
 .env
+.env.local
+.env.*.local
+.dev.vars
+.dev.vars.local
+
+# Data
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Claude Code
+.claude/settings.local.json

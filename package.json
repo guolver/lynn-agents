@@ -1,0 +1,13 @@
+{
+  "name": "my-agent",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Agent Hub — extensible platform for registering and invoking auditable business agents",
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.0",
+    "lint-staged": "^15.5.0"
+  }
+}
