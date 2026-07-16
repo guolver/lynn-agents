@@ -7,8 +7,9 @@ Agent Hub 的多路由可视化控制台。当前包含运行总览、Agent 目�
 要求 Node.js 22.13 或更高版本：
 
 ```bash
-npm ci
-npm run dev
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
 默认启用演示数据，便于独立查看完整界面。复制 `.env.example` 为 `.env.local`，并设置：
@@ -37,6 +38,6 @@ app/(console)/
 ## 验证
 
 ```bash
-npm run build
+pnpm build
 node --test tests/rendered-html.test.mjs
 ```
