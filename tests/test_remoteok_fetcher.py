@@ -5,6 +5,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from agent_hub.agents.global_part_time.fetchers.remoteok import fetch, map_job, strip_html
+from agent_hub.agents.global_part_time.repository import Repository
+from agent_hub.agents.global_part_time.service import AgentService
 
 
 class StripHtmlTest(unittest.TestCase):
@@ -212,3 +214,56 @@ class FetchTest(unittest.TestCase):
         request = call_args[0][0]
         self.assertIn("tag=python", request.full_url)
         self.assertIn("tag=react", request.full_url)
+
+
+REMOTEOK_SOURCE = {
+    "name": "RemoteOK Public API",
+    "source_type": "api",
+    "base_url": "https://remoteok.com/api",
+    "authorization_basis": "public API, attribution required",
+    "allowed_paths": ["/api"],
+    "prohibited_actions": [],
+    "rate_limit": "60/hour",
+    "retention_policy": "30 days",
+}
+
+
+class EndToEndSyncTest(unittest.TestCase):
+    @patch("agent_hub.agents.global_part_time.fetchers.remoteok.urlopen")
+    def test_full_pipeline(self, mock_urlopen_fn):
+        mock_urlopen_fn.return_value = _mock_urlopen(MOCK_API_RESPONSE)
+
+        # 1. Set up service
+        repo = Repository(":memory:")
+        service = AgentService(repo)
+
+        # 2. Register and approve source
+        source = service.create_source(REMOTEOK_SOURCE, "operator")
+        service.review_source(source["id"], True, "operator")
+
+        # 3. Fetch and map
+        raw_jobs = fetch()
+        mapped = [map_job(r) for r in raw_jobs]
+
+        # 4. Sync
+        result = service.sync_source(source["id"], mapped, "worker")
+
+        self.assertEqual(result["received"], 2)
+        self.assertEqual(result["imported"], 2)
+        self.assertEqual(result["duplicates"], 0)
+        self.assertEqual(result["rejected"], 0)
+
+        # 5. Verify jobs are in the store
+        jobs = repo.list("job")
+        self.assertEqual(len(jobs), 2)
+        titles = {j["title_original"] for j in jobs}
+        self.assertIn("Dev", titles)
+        self.assertIn("Designer", titles)
+
+        # 6. Second sync should deduplicate
+        mock_urlopen_fn.return_value = _mock_urlopen(MOCK_API_RESPONSE)
+        raw_jobs2 = fetch()
+        mapped2 = [map_job(r) for r in raw_jobs2]
+        result2 = service.sync_source(source["id"], mapped2, "worker")
+        self.assertEqual(result2["imported"], 0)
+        self.assertEqual(result2["duplicates"], 2)
