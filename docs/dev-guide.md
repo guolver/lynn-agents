@@ -150,3 +150,67 @@ pip install --proxy "" -e '.[dev]'
 ### 数据库
 
 默认使用 SQLite，数据文件位于 `./data/agent.db`，无需额外配置数据库。
+
+---
+
+## 四、PostgreSQL 开发环境（可选）
+
+SQLite 是默认存储，适合本地开发和单元测试。如需使用 PostgreSQL：
+
+### 1. 启动基础设施
+
+```bash
+make infra-up    # 启动 PostgreSQL 16 + Redis 7（Docker Compose）
+```
+
+服务端口（仅绑定 127.0.0.1）：
+- PostgreSQL: `5432`
+- Redis: `6379`
+
+### 2. 应用迁移
+
+```bash
+make migrate     # 运行 alembic upgrade head
+```
+
+### 3. 切换到 PostgreSQL
+
+在 `.env` 中取消注释 `DATABASE_URL`：
+
+```env
+DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@127.0.0.1:5432/agent_hub
+```
+
+应用启动时会自动检测 `DATABASE_URL` 并使用 PostgreSQL。
+
+### 4. 运行 PostgreSQL 集成测试
+
+```bash
+make test-pg     # 需要先 make infra-up && make migrate
+```
+
+### 5. Alembic 常用命令
+
+```bash
+# 查看当前迁移状态
+alembic current
+
+# 生成新迁移（基于模型变更）
+alembic revision --autogenerate -m "description"
+
+# 回退到初始状态
+alembic downgrade base
+
+# 重建数据库
+alembic downgrade base && alembic upgrade head
+```
+
+### 6. 关于 SQLite 数据迁移
+
+现有 `data/agent.db` 中的数据**不会**自动迁移到 PostgreSQL。这是有意为之的设计决定（参见 `docs/adr/0004-sqlite-data-migration.md`）。两种存储可以并行使用，通过环境变量切换。
+
+### 7. 停止基础设施
+
+```bash
+make infra-down  # 停止容器，保留数据卷
+```

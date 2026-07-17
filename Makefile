@@ -1,4 +1,4 @@
-.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py format clean
+.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg format clean infra infra-up infra-down migrate
 
 # — 初始化 ————————————————————————————————————
 
@@ -34,8 +34,25 @@ lint-fe: ## 前端 lint (eslint)
 
 test: test-py ## 运行所有测试
 
-test-py: ## Python 单元测试
+test-py: ## Python 单元测试（不需要 PostgreSQL）
 	. .venv/bin/activate && python -m unittest discover -s tests -v
+
+test-pg: ## PostgreSQL 集成测试（需要运行 make infra-up && make migrate）
+	. .venv/bin/activate && TEST_DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@127.0.0.1:5432/agent_hub_test \
+		python -m unittest tests.test_postgres_repository tests.test_postgres_concurrency tests.test_postgres_workflow -v
+
+# — 基础设施 ————————————————————————————————————
+
+infra-up: infra ## 启动本地 PostgreSQL 和 Redis
+infra: ## 启动本地 PostgreSQL 和 Redis
+	docker compose -f compose.dev.yaml up -d --wait
+
+infra-down: ## 停止基础设施（保留数据卷）
+	docker compose -f compose.dev.yaml down
+
+migrate: ## 应用数据库迁移
+	. .venv/bin/activate && DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@127.0.0.1:5432/agent_hub \
+		alembic upgrade head
 
 format: ## 格式化代码
 	. .venv/bin/activate && ruff format src/ tests/
