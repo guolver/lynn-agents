@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterable
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -44,6 +45,17 @@ def create_app(
 
     repo = repository or create_repository()
     expand_fn = None
+    neo4j_driver = None
+
+    def close_neo4j_driver() -> None:
+        nonlocal neo4j_driver
+        driver, neo4j_driver = neo4j_driver, None
+        if driver is not None:
+            try:
+                driver.close()
+            except Exception:
+                logger.warning("Failed to close Neo4j driver", exc_info=True)
+
     neo4j_uri = os.getenv("NEO4J_URI")
     if neo4j_uri:
         try:
@@ -57,6 +69,7 @@ def create_app(
             logger.info("Skill graph initialized from Neo4j at %s", neo4j_uri)
         except Exception:
             logger.warning("Failed to initialize skill graph, continuing without it", exc_info=True)
+            close_neo4j_driver()
     part_time_service = AgentService(repo, expand_fn=expand_fn)
     registry = AgentRegistry()
     registry.register(GlobalPartTimeAgent(part_time_service, repo))
@@ -65,10 +78,18 @@ def create_app(
     if load_plugins:
         discover_agents(registry, allowed_plugins=allowed_plugins)
 
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI):
+        try:
+            yield
+        finally:
+            close_neo4j_driver()
+
     application = FastAPI(
         title="Agent Hub",
         version="0.2.0",
         description="统一发现、治理和调用多个业务 Agent；保留兼职 Agent 的兼容 API。",
+        lifespan=lifespan,
     )
     application.state.agent_registry = registry
     application.state.part_time_repository = repo
