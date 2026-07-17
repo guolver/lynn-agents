@@ -31,16 +31,32 @@ export type Source = {
 export type Job = {
   id: string;
   title_original: string;
+  title_zh?: string | null;
   company_name: string;
+  description_original?: string;
+  description_zh?: string | null;
+  employment_type?: string;
   work_mode: string;
   countries_allowed: string[];
+  timezone_requirements?: string[];
+  languages?: string[];
+  skills?: string[];
+  categories?: string[];
+  hours_per_week_min?: number | null;
+  hours_per_week_max?: number | null;
   risk_level: "low" | "medium" | "high";
   risk_score: number;
   quality_score: number;
   status: string;
-  compensation_min?: number;
-  compensation_max?: number;
-  compensation_currency?: string;
+  compensation_min?: number | null;
+  compensation_max?: number | null;
+  compensation_currency?: string | null;
+  compensation_period?: string | null;
+  canonical_url?: string | null;
+  application_deadline?: string | null;
+  published_at?: string | null;
+  source_id?: string;
+  created_at?: string;
 };
 
 export type AuditEvent = {

@@ -800,6 +800,30 @@ a {
   background: #f9fbf9;
 }
 
+.clickable-row:has(.cell-link:focus-visible) {
+  background: #f3f8f4;
+}
+
+.cell-link {
+  display: block;
+  margin: -14px -15px;
+  padding: 14px 15px;
+}
+
+.cell-link:hover .cell-primary,
+.cell-link:focus-visible .cell-primary,
+.detail-link:hover,
+.detail-link:focus-visible {
+  color: var(--green);
+}
+
+.cell-link:focus-visible,
+.detail-link:focus-visible {
+  border-radius: 5px;
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
 .cell-primary {
   font-weight: 650;
 }
@@ -808,6 +832,58 @@ a {
   margin-top: 4px;
   color: #748278;
   font-size: 9px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.35fr) minmax(0, 1fr);
+  gap: 14px 18px;
+  margin: 0;
+}
+
+.detail-grid dt {
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.detail-grid dd {
+  margin: 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.detail-link {
+  color: var(--green-deep);
+  font-weight: 650;
+}
+
+.job-detail-section + .job-detail-section {
+  margin-top: 22px;
+}
+
+.job-detail-heading {
+  margin: 0;
+  font-size: 11px;
+}
+
+.job-detail-tags {
+  margin-top: 9px;
+}
+
+.job-description {
+  max-height: 400px;
+  margin-top: 9px;
+  overflow: auto;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.job-detail-footer {
+  margin-top: 24px;
+  font-size: 11px;
 }
 
 .toolbar {

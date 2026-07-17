@@ -36,6 +36,21 @@ export function getJobs(): Promise<Job[]> {
   return readJson("/api/v1/jobs", demoJobs);
 }
 
+export async function getJob(jobId: string): Promise<Job | null> {
+  if (DEMO_MODE) return demoJobs.find((job) => job.id === jobId) ?? null;
+
+  try {
+    const response = await fetch(`${API_URL}/api/v1/jobs/${jobId}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as Job;
+  } catch {
+    return null;
+  }
+}
+
 export function getAudits(): Promise<AuditEvent[]> {
   return readJson("/api/v1/audit?limit=100", demoAudits);
 }

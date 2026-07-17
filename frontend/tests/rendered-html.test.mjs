@@ -33,3 +33,38 @@ test("server-renders the Agent catalog", async () => {
   assert.match(html, /统一发现和治理业务 Agent/);
   assert.match(html, /全球兼职职位匹配 Agent/);
 });
+
+test("job catalog links to individual job details", async () => {
+  const response = await render("/jobs");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /href="\/jobs\/job_001"/);
+  assert.match(html, /AI Evaluation Specialist/);
+});
+
+test("server-renders an individual job detail", async () => {
+  const response = await render("/jobs/job_001");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /岗位详情/);
+  assert.match(html, /职位描述/);
+  assert.match(html, /评估 AI 模型输出/);
+  assert.match(html, /返回职位列表/);
+});
+
+test("does not substitute demo data when the live job API is unavailable", async () => {
+  const previousDemoMode = process.env.AGENT_HUB_DEMO_MODE;
+  const previousApiUrl = process.env.AGENT_HUB_API_URL;
+  process.env.AGENT_HUB_DEMO_MODE = "false";
+  process.env.AGENT_HUB_API_URL = "http://127.0.0.1:9";
+
+  try {
+    const response = await render("/jobs/job_001");
+    assert.equal(response.status, 404);
+  } finally {
+    if (previousDemoMode === undefined) delete process.env.AGENT_HUB_DEMO_MODE;
+    else process.env.AGENT_HUB_DEMO_MODE = previousDemoMode;
+    if (previousApiUrl === undefined) delete process.env.AGENT_HUB_API_URL;
+    else process.env.AGENT_HUB_API_URL = previousApiUrl;
+  }
+});
