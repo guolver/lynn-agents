@@ -10,7 +10,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -26,12 +26,28 @@ SCORE_WEIGHTS = {
 }
 
 HIGH_RISK_TERMS = {
-    "刷单", "博彩", "资金盘", "银行卡密码", "验证码", "先付款", "充值",
-    "wire money", "bank password", "verification code", "pay upfront", "crypto deposit",
+    "刷单",
+    "博彩",
+    "资金盘",
+    "银行卡密码",
+    "验证码",
+    "先付款",
+    "充值",
+    "wire money",
+    "bank password",
+    "verification code",
+    "pay upfront",
+    "crypto deposit",
 }
 MEDIUM_RISK_TERMS = {
-    "购买设备", "保证收益", "轻松月入", "无经验高薪", "buy equipment",
-    "guaranteed income", "easy money", "unlimited earnings",
+    "购买设备",
+    "保证收益",
+    "轻松月入",
+    "无经验高薪",
+    "buy equipment",
+    "guaranteed income",
+    "easy money",
+    "unlimited earnings",
 }
 
 
@@ -124,7 +140,9 @@ def assess_risk(job: dict[str, Any]) -> RiskResult:
     return RiskResult(score, "low", signals, "accept")
 
 
-def hard_filter(candidate: dict[str, Any], job: dict[str, Any], already_sent: bool = False) -> list[str]:
+def hard_filter(
+    candidate: dict[str, Any], job: dict[str, Any], already_sent: bool = False
+) -> list[str]:
     """返回所有硬过滤失败原因；空列表表示职位可进入排序阶段。"""
     failures: list[str] = []
     if candidate.get("consent_status") != "opted_in":
@@ -145,7 +163,8 @@ def hard_filter(candidate: dict[str, Any], job: dict[str, Any], already_sent: bo
         failures.append("work_mode_mismatch")
     required_languages = set(job.get("languages") or [])
     candidate_languages = {
-        item["code"] if isinstance(item, dict) else item for item in candidate.get("languages") or []
+        item["code"] if isinstance(item, dict) else item
+        for item in candidate.get("languages") or []
     }
     if required_languages and not required_languages.issubset(candidate_languages):
         failures.append("language_mismatch")
@@ -166,31 +185,57 @@ def hard_filter(candidate: dict[str, Any], job: dict[str, Any], already_sent: bo
     return failures
 
 
-def _skill_score(candidate: dict[str, Any], job: dict[str, Any]) -> float:
+def _skill_score(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    expand_fn: Callable[[list[str]], set[str]] | None = None,
+) -> tuple[float, list[str], list[str]]:
     required = {_norm(x) for x in job.get("skills") or []}
     if not required:
-        return 0.5
-    owned = {
-        _norm(x["name"] if isinstance(x, dict) else x) for x in candidate.get("skills") or []
-    }
-    return len(required & owned) / len(required)
+        return 0.5, [], []
+    raw_owned = [x["name"] if isinstance(x, dict) else x for x in candidate.get("skills") or []]
+    owned = {_norm(x) for x in raw_owned}
+    if expand_fn:
+        expanded = {_norm(x) for x in expand_fn(raw_owned)}
+    else:
+        expanded = set()
+    direct_set = required & owned
+    indirect_set = (required & expanded) - direct_set
+    direct = sorted(direct_set)
+    indirect = sorted(indirect_set)
+    score = (len(direct) + len(indirect) * 0.6) / len(required)
+    return min(score, 1.0), direct, indirect
 
 
-def score_match(candidate: dict[str, Any], job: dict[str, Any]) -> tuple[float, dict[str, float], list[str]]:
+def score_match(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    expand_fn: Callable[[list[str]], set[str]] | None = None,
+) -> tuple[float, dict[str, float], list[str]]:
     """按照版本化权重生成可复现总分、分项分数和面向用户的理由。"""
-    skill = _skill_score(candidate, job)
+    skill, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
     required_langs = set(job.get("languages") or [])
     owned_langs = {
         x["code"] if isinstance(x, dict) else x for x in candidate.get("languages") or []
     }
     language = len(required_langs & owned_langs) / len(required_langs) if required_langs else 1.0
     countries = set(job.get("countries_allowed") or [])
-    location = 1.0 if not countries or "GLOBAL" in countries or candidate.get("country") in countries else 0.0
-    timezone = float(timezone_matches(candidate.get("timezone"), job.get("timezone_requirements") or []))
+    location = (
+        1.0
+        if not countries or "GLOBAL" in countries or candidate.get("country") in countries
+        else 0.0
+    )
+    timezone = float(
+        timezone_matches(candidate.get("timezone"), job.get("timezone_requirements") or [])
+    )
     location_timezone = 0.7 * location + 0.3 * timezone
     minimum = (candidate.get("minimum_hourly_rate") or {}).get("amount")
     maximum = job.get("compensation_max")
-    compensation = 0.5 if maximum is None or minimum is None else min(float(maximum) / max(float(minimum), 1), 1.0)
+    compensation = (
+        0.5
+        if maximum is None or minimum is None
+        else min(float(maximum) / max(float(minimum), 1), 1.0)
+    )
     desired = set(candidate.get("desired_roles") or [])
     categories = set(job.get("categories") or [])
     preference = 1.0 if not desired or desired & categories else 0.4
@@ -206,7 +251,11 @@ def score_match(candidate: dict[str, Any], job: dict[str, Any]) -> tuple[float, 
     }
     total = round(sum(breakdown[k] * SCORE_WEIGHTS[k] for k in SCORE_WEIGHTS), 4)
     reasons = []
-    if skill >= 0.7:
+    if direct_skills:
+        reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
+    if indirect_skills:
+        reasons.append(f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关")
+    if not direct_skills and not indirect_skills and skill >= 0.5:
         reasons.append("技能与职位要求高度匹配")
     if location_timezone >= 0.7:
         reasons.append("地区与工作时区满足要求")

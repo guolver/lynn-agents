@@ -74,5 +74,79 @@ class DomainRulesTest(unittest.TestCase):
         self.assertEqual(dedup_key(self.job), dedup_key(other))
 
 
+class SkillScoreExpansionTest(unittest.TestCase):
+    def test_skill_score_without_expand_fn_is_backward_compatible(self):
+        candidate = {"skills": [{"name": "Python"}, {"name": "React"}]}
+        job = {"skills": ["Python", "React"]}
+        score, breakdown, reasons = score_match(candidate, job)
+        self.assertEqual(breakdown["skills"], 1.0)
+
+    def test_skill_score_with_expand_fn_boosts_indirect_matches(self):
+        candidate = {"skills": [{"name": "React"}]}
+        job = {"skills": ["前端开发"]}
+
+        def mock_expand(names):
+            mapping = {"React": {"React", "前端开发"}}
+            result = set()
+            for n in names:
+                result.update(mapping.get(n, set()))
+            return result
+
+        score, breakdown, reasons = score_match(candidate, job, expand_fn=mock_expand)
+        self.assertGreater(breakdown["skills"], 0.0)
+        self.assertLessEqual(breakdown["skills"], 0.6)
+
+    def test_skill_score_direct_match_preferred_over_indirect(self):
+        candidate = {"skills": [{"name": "Python"}, {"name": "React"}]}
+        job = {"skills": ["Python", "前端开发"]}
+
+        def mock_expand(names):
+            return {"Python", "React", "前端开发", "后端开发"}
+
+        score, breakdown, reasons = score_match(candidate, job, expand_fn=mock_expand)
+        # Python direct (1.0) + 前端开发 indirect (0.6) → (1.0 + 0.6) / 2 = 0.8
+        self.assertAlmostEqual(breakdown["skills"], 0.8, places=2)
+
+    def test_score_match_reasons_include_skill_expansion(self):
+        candidate = {
+            "consent_status": "opted_in",
+            "country": "CN",
+            "timezone": "Asia/Shanghai",
+            "languages": [{"code": "en"}],
+            "skills": [{"name": "React"}],
+            "desired_roles": [],
+            "minimum_hourly_rate": None,
+            "availability_hours_per_week": 40,
+            "allowed_work_modes": ["remote"],
+            "excluded_companies": [],
+        }
+        job = {
+            "title_original": "Frontend Dev",
+            "company_name": "Test",
+            "description_original": "Build UIs",
+            "canonical_url": "https://example.com/1",
+            "status": "active",
+            "review_status": "not_required",
+            "risk_score": 0.0,
+            "work_mode": "remote",
+            "countries_allowed": ["GLOBAL"],
+            "timezone_requirements": [],
+            "languages": ["en"],
+            "skills": ["前端开发"],
+            "categories": [],
+            "hours_per_week_min": 10,
+            "compensation_max": None,
+            "compensation_currency": "USD",
+            "quality_score": 0.8,
+        }
+
+        def mock_expand(names):
+            return {"React", "前端开发"}
+
+        score, breakdown, reasons = score_match(candidate, job, expand_fn=mock_expand)
+        has_expansion_reason = any("扩展" in r or "相关" in r for r in reasons)
+        self.assertTrue(has_expansion_reason, f"Expected expansion reason in {reasons}")
+
+
 if __name__ == "__main__":
     unittest.main()
