@@ -52,7 +52,7 @@ V1 重点证明以下能力：
 - 未经候选人授权采集简历或发送消息。
 - 自动代表候选人提交敏感材料、接受合同或承诺入职。
 - V1 同时覆盖所有行业、语言、国家和通知渠道。
-- 一开始引入 Neo4j、Kafka、Kubernetes 等非必要基础设施。
+- 一开始引入 Kafka、Kubernetes 等非必要基础设施。
 
 ## 3. 当前基线
 
@@ -66,15 +66,21 @@ V1 重点证明以下能力：
 - 确定性加权评分和基础推荐理由。
 - 人工审批、模拟通知、退订和审计。
 - SQLite MVP Repository。
-- 21 个通过的 Python 自动化测试。
+- **PostgreSQL 16 数据层**（Phase 0 + Phase 1 已完成）：
+  - 21 表 SQLAlchemy ORM 模型 + Alembic 迁移。
+  - `PostgresRepository` 实现（CRUD / 审计 / 事务性幂等 / 并发安全）。
+  - `RepositoryProtocol` 抽象 + `create_repository` 配置工厂。
+  - Docker Compose 本地开发基础设施。
+  - Repository 契约测试、PostgreSQL 集成测试和工作流 E2E 测试。
+- **RemoteOK 职位连接器**：首个真实职位来源，CLI 脚本完成采集到同步全流程。
+- 40+ 个通过的 Python 自动化测试。
 
 V1 主要缺口：
 
-- PostgreSQL 结构化模型与迁移。
 - pgvector、Embedding 和 RAG 语义检索。
-- 招聘技能知识图谱。
+- 招聘技能知识图谱（Neo4j，进行中）。
 - 异步任务、失败重试和运行状态。
-- 真实职位连接器与邮件 Provider。
+- 真实邮件 Provider。
 - 前端真实业务操作闭环。
 
 ## 4. 技术方案
@@ -87,7 +93,7 @@ V1 主要缺口：
 | 异步任务 | Celery、Redis |
 | 前端 | 现有 Next.js 管控台 |
 | 语义检索 | pgvector cosine distance |
-| 技能图谱 | PostgreSQL 邻接表 |
+| 技能图谱 | Neo4j 5.x（Docker），`neo4j` Python driver |
 | 信息抽取 | LLM 结构化输出 + Pydantic 校验 |
 | 通知 | 邮件 Provider；开发环境模拟发送 |
 | 可观测性 | 结构化日志、trace_id、workflow_run_id |
@@ -116,15 +122,15 @@ FastAPI / Agent Hub
       ├── Embedding Provider
       └── Notification Provider
       │
-      ├───────────────┐
-      ▼               ▼
-PostgreSQL         Redis / Celery
-+ pgvector         Workflow Workers
+      ├───────────────┬───────────────┐
+      ▼               ▼               ▼
+PostgreSQL         Neo4j 5.x       Redis / Celery
++ pgvector         Skill Graph     Workflow Workers
 ```
 
 ## 6. 分阶段实施计划
 
-### Phase 0：冻结基线
+### Phase 0：冻结基线 ✅
 
 目标：保证后续重构不破坏当前功能。
 
@@ -142,7 +148,7 @@ PostgreSQL         Redis / Celery
 - 核心领域行为有明确自动化测试保护。
 - V1 范围和非目标得到确认。
 
-### Phase 1：PostgreSQL 数据层
+### Phase 1：PostgreSQL 数据层 ✅
 
 目标：用结构化 PostgreSQL 模型替换通用 JSON 实体存储。
 
@@ -198,41 +204,51 @@ idempotency_records
 
 目标：统一技能表达，并在受控范围内扩展相关技能。
 
-关系示例：
+技术方案：使用 **Neo4j 5.x**（Docker 部署）作为图数据库，通过 `neo4j` Python driver 访问。图谱包含 `Category`、`Skill` 节点和 `ALIAS_OF`、`CHILD_OF`、`RELATED_TO`、`REQUIRES` 关系。
+
+关系示例（Cypher）：
 
 ```text
-K8s ──alias_of──▶ Kubernetes
-Kubernetes ──related_to──▶ Docker
-Kubernetes ──requires──▶ Linux
-FastAPI ──child_of──▶ Python Web Framework
+(:Skill {name: "K8s"})-[:ALIAS_OF]->(:Skill {name: "Kubernetes"})
+(:Skill {name: "Kubernetes"})-[:RELATED_TO]->(:Skill {name: "Docker"})
+(:Skill {name: "Kubernetes"})-[:REQUIRES]->(:Skill {name: "Linux"})
+(:Skill {name: "FastAPI"})-[:CHILD_OF]->(:Category {name: "后端开发"})
 ```
 
 任务：
 
-- 建立规范技能、技能别名和技能关系表。
-- 支持大小写、缩写、中英文别名规范化。
-- 实现最大深度为 1～2 的图谱扩展。
-- 为不同关系定义权重和衰减系数。
-- 保存直接技能与扩展技能的来源和关系路径。
+- 引入 `neo4j` 运行时依赖和 `testcontainers[neo4j]` 测试依赖。
+- 在 Docker Compose 中添加 Neo4j 5.x 服务。
+- 创建 `SkillGraphService`，提供 `seed()`、`resolve()` 和 `expand()` 方法。
+- 使用 `MERGE` 保证种子数据幂等写入。
+- `resolve()` 将别名规范化为标准技能名（大小写、缩写、中英文）。
+- `expand()` 批量解析别名并扩展到父级 Category，返回标准技能名 + Category 集合。
+- 实现最大深度为 1～2 的图谱扩展（通过 Cypher 查询控制跳数）。
 - 为图谱循环、重复路径和弱关联扩散增加保护。
-- 在后台增加技能、别名和关系管理能力。
+- 在 `domain.py` 的 `_skill_score` 和 `score_match` 中增加可选 `expand_fn` 参数。
+- 在 `app.py` 启动时检测 `NEO4J_URI` 环境变量，有则初始化 `SkillGraphService` 并注入。
+- 初始种子数据覆盖 6 个类别约 45 个软件开发技能及其别名。
 
 建议初始权重：
 
 | 命中方式 | 权重 |
 | --- | ---: |
 | 直接命中 | 1.00 |
-| `alias_of` | 1.00 |
-| `requires` | 0.75 |
-| `parent_of` / `child_of` | 0.65 |
-| `related_to` | 0.40 |
+| `ALIAS_OF` | 1.00 |
+| `REQUIRES` | 0.75 |
+| `CHILD_OF` | 0.65 |
+| `RELATED_TO` | 0.40 |
 | 二跳关联 | 一跳权重 × 0.50 |
 
 验收标准：
 
-- `K8s` 与 `Kubernetes` 被规范为同一技能。
+- `K8s` 与 `Kubernetes` 被 `resolve()` 规范为同一技能。
+- `expand(["React"])` 返回 `{"React", "前端开发"}`。
+- 没有 Neo4j 时（`NEO4J_URI` 未设置），系统降级为无扩展模式，不影响现有功能。
+- 种子数据可以重复执行（`MERGE` 幂等）。
 - 每个扩展技能都能解释关系路径。
 - 图谱不会无限递归或通过弱关联产生过高分数。
+- 测试使用 `testcontainers[neo4j]` 自动启动临时 Neo4j 实例。
 
 ### Phase 3：Embedding 与 RAG 检索
 
@@ -422,16 +438,16 @@ pending → running → succeeded
 
 按个人项目、兼职开发估算：
 
-| 周期 | 交付内容 |
-| --- | --- |
-| 第 1 周 | 基线、ADR、PostgreSQL 环境与数据模型 |
-| 第 2 周 | Repository 迁移、事务幂等与集成测试 |
-| 第 3 周 | 技能规范化与知识图谱 |
-| 第 4 周 | Embedding、pgvector 和语义召回 |
-| 第 5 周 | 混合评分、证据和推荐理由 |
-| 第 6 周 | Celery、Redis、任务状态和失败重试 |
-| 第 7 周 | 审批、邮件 Provider 和前端真实数据 |
-| 第 8 周 | E2E、可观测性、安全加固和演示数据 |
+| 周期 | 交付内容 | 状态 |
+| --- | --- | --- |
+| 第 1 周 | 基线、ADR、PostgreSQL 环境与数据模型 | ✅ 已完成 |
+| 第 2 周 | Repository 迁移、事务幂等与集成测试 | ✅ 已完成 |
+| 第 3 周 | Neo4j 技能知识图谱（`SkillGraphService`） | 🔄 进行中 |
+| 第 4 周 | Embedding、pgvector 和语义召回 | |
+| 第 5 周 | 混合评分、证据和推荐理由 | |
+| 第 6 周 | Celery、Redis、任务状态和失败重试 | |
+| 第 7 周 | 审批、邮件 Provider 和前端真实数据 | |
+| 第 8 周 | E2E、可观测性、安全加固和演示数据 | |
 
 如果时间有限，可以将复杂采集连接器和多通知渠道放入 V1.1，但不应省略持久化幂等、匹配证据和任务状态。
 
@@ -475,16 +491,23 @@ pending → running → succeeded
 - 从职位采集到通知发送具有统一 trace。
 - 自动化测试覆盖完整主流程。
 
-## 10. 第一实施批次
+## 10. 实施进度
 
-建议首先执行 Phase 0 和 Phase 1：
+### 第一批次（已完成）
 
-1. 固定当前测试基线和 API 契约。
-2. 确定 PostgreSQL 数据模型。
-3. 引入 SQLAlchemy、Alembic 和 psycopg。
-4. 创建首版数据库迁移。
-5. 抽象 Repository，并实现 PostgreSQL 版本。
-6. 将现有业务流程切换到 PostgreSQL。
-7. 增加事务、并发去重和幂等集成测试。
+Phase 0 + Phase 1 + RemoteOK 连接器：
 
-这一批次是 pgvector、技能知识图谱、工作流状态和审计增强的共同基础，应在开始 AI 检索功能之前完成。
+1. ✅ 固定当前测试基线和 API 契约。
+2. ✅ 确定 PostgreSQL 数据模型（21 表）。
+3. ✅ 引入 SQLAlchemy、Alembic 和 psycopg。
+4. ✅ 创建首版数据库迁移。
+5. ✅ 抽象 Repository（`RepositoryProtocol`），并实现 `PostgresRepository`。
+6. ✅ 通过 `create_repository` 工厂按环境变量切换存储后端。
+7. ✅ 增加事务、并发去重和幂等集成测试。
+8. ✅ 实现 RemoteOK 职位连接器（首个真实来源）。
+
+### 当前批次
+
+- Phase 2（Neo4j 技能知识图谱）：另一 Agent 独立进行。
+- Phase 5（Celery + Redis 任务编排）：可并行推进，不依赖技能图谱。
+- Phase 3（pgvector + Embedding）：pgvector 基础设施可独立搭建，完整召回链路需等 Phase 2。
