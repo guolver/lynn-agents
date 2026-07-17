@@ -9,8 +9,16 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from .repository import Repository
-from .domain import RULE_VERSION, assess_risk, canonicalize_url, dedup_key, hard_filter, score_match, utcnow
+from .repository import RepositoryProtocol
+from .domain import (
+    RULE_VERSION,
+    assess_risk,
+    canonicalize_url,
+    dedup_key,
+    hard_filter,
+    score_match,
+    utcnow,
+)
 
 
 class NotFoundError(ValueError):
@@ -23,7 +31,8 @@ class PolicyError(ValueError):
 
 class AgentService:
     """实现职位采集、候选匹配、审批和通知的完整业务用例。"""
-    def __init__(self, repository: Repository):
+
+    def __init__(self, repository: RepositoryProtocol):
         self.repo = repository
 
     @staticmethod
@@ -48,7 +57,9 @@ class AgentService:
         self.repo.audit("source.created", "source", source["id"], actor)
         return source
 
-    def review_source(self, source_id: str, approved: bool, actor: str, note: str = "") -> dict[str, Any]:
+    def review_source(
+        self, source_id: str, approved: bool, actor: str, note: str = ""
+    ) -> dict[str, Any]:
         source = self._required("source", source_id)
         source.update(
             review_status="approved" if approved else "rejected",
@@ -78,13 +89,19 @@ class AgentService:
             risk = assess_risk(job)
             if risk.action == "reject":
                 rejected += 1
-                self.repo.audit("job.rejected", "source", source_id, actor, {"signals": risk.signals})
+                self.repo.audit(
+                    "job.rejected", "source", source_id, actor, {"signals": risk.signals}
+                )
                 continue
             prior = by_key.get(key)
             now = utcnow()
             if prior:
                 prior.setdefault("alternate_sources", []).append(
-                    {"source_id": source_id, "source_job_id": job.get("source_job_id"), "url": job["canonical_url"]}
+                    {
+                        "source_id": source_id,
+                        "source_job_id": job.get("source_job_id"),
+                        "url": job["canonical_url"],
+                    }
                 )
                 prior["last_seen_at"] = now
                 self.repo.put("job", prior)
@@ -113,7 +130,15 @@ class AgentService:
             review += int(risk.action == "review")
             self.repo.audit("job.imported", "job", job["id"], actor, {"risk": risk.level})
         self.repo.audit("source.synced", "source", source_id, actor, {"received": len(jobs)})
-        return {"source_id": source_id, "received": len(jobs), "imported": imported, "duplicates": duplicates, "pending_review": review, "rejected": rejected, "job_ids": ids}
+        return {
+            "source_id": source_id,
+            "received": len(jobs),
+            "imported": imported,
+            "duplicates": duplicates,
+            "pending_review": review,
+            "rejected": rejected,
+            "job_ids": ids,
+        }
 
     def review_job(self, job_id: str, approved: bool, actor: str, note: str = "") -> dict[str, Any]:
         job = self._required("job", job_id)
@@ -145,7 +170,9 @@ class AgentService:
         self.repo.audit("candidate.created", "candidate", candidate["id"], actor)
         return candidate
 
-    def update_candidate(self, candidate_id: str, changes: dict[str, Any], actor: str) -> dict[str, Any]:
+    def update_candidate(
+        self, candidate_id: str, changes: dict[str, Any], actor: str
+    ) -> dict[str, Any]:
         candidate = self._required("candidate", candidate_id)
         protected = {"id", "consent_status", "created_at", "updated_at"}
         candidate.update({k: v for k, v in changes.items() if k not in protected})
@@ -153,14 +180,18 @@ class AgentService:
         self.repo.audit("candidate.preferences_updated", "candidate", candidate_id, actor)
         return candidate
 
-    def set_consent(self, candidate_id: str, opted_in: bool, actor: str, version: str) -> dict[str, Any]:
+    def set_consent(
+        self, candidate_id: str, opted_in: bool, actor: str, version: str
+    ) -> dict[str, Any]:
         candidate = self._required("candidate", candidate_id)
         candidate.update(
             consent_status="opted_in" if opted_in else "opted_out",
             consent_record={"version": version, "recorded_at": utcnow(), "actor": actor},
         )
         self.repo.put("candidate", candidate)
-        self.repo.audit("candidate.consent_changed", "candidate", candidate_id, actor, {"opted_in": opted_in})
+        self.repo.audit(
+            "candidate.consent_changed", "candidate", candidate_id, actor, {"opted_in": opted_in}
+        )
         return candidate
 
     def delete_candidate(self, candidate_id: str, actor: str) -> dict[str, Any]:
@@ -170,7 +201,9 @@ class AgentService:
             for item in self.repo.list(kind):
                 if item.get("candidate_id") == candidate_id:
                     self.repo.delete(kind, item["id"])
-        self.repo.audit("candidate.deleted", "candidate", candidate_id, actor, {"personal_data_removed": True})
+        self.repo.audit(
+            "candidate.deleted", "candidate", candidate_id, actor, {"personal_data_removed": True}
+        )
         return {"deleted": True, "candidate_id": candidate_id}
 
     def run_matches(self, candidate_id: str, actor: str, limit: int = 50) -> dict[str, Any]:
@@ -184,7 +217,8 @@ class AgentService:
         sent_job_ids = {
             job_id
             for notification in self.repo.list("notification")
-            if notification.get("candidate_id") == candidate_id and notification.get("status") == "sent"
+            if notification.get("candidate_id") == candidate_id
+            and notification.get("status") == "sent"
             for job_id in notification.get("job_ids", [])
         }
         results = []
@@ -197,16 +231,27 @@ class AgentService:
             score, breakdown, reasons = score_match(candidate, job)
             match = {
                 "id": existing_matches.get(job["id"], {}).get("id", self._id()),
-                "candidate_id": candidate_id, "job_id": job["id"],
-                "hard_filter_passed": True, "score": score, "score_breakdown": breakdown,
-                "reasons": reasons, "rule_version": RULE_VERSION, "job_version": job["updated_at"],
+                "candidate_id": candidate_id,
+                "job_id": job["id"],
+                "hard_filter_passed": True,
+                "score": score,
+                "score_breakdown": breakdown,
+                "reasons": reasons,
+                "rule_version": RULE_VERSION,
+                "job_version": job["updated_at"],
                 "created_at": utcnow(),
             }
             self.repo.put("match", match)
             results.append(match)
         results.sort(key=lambda x: x["score"], reverse=True)
         results = results[:limit]
-        self.repo.audit("matches.run", "candidate", candidate_id, actor, {"matched": len(results), "filtered": len(filtered), "rule_version": RULE_VERSION})
+        self.repo.audit(
+            "matches.run",
+            "candidate",
+            candidate_id,
+            actor,
+            {"matched": len(results), "filtered": len(filtered), "rule_version": RULE_VERSION},
+        )
         return {"matches": results, "filtered": filtered}
 
     def candidate_matches(self, candidate_id: str) -> list[dict[str, Any]]:
@@ -217,7 +262,15 @@ class AgentService:
 
     def feedback(self, match_id: str, value: str, actor: str) -> dict[str, Any]:
         match = self._required("match", match_id)
-        item = self.repo.put("feedback", {"id": self._id(), "match_id": match_id, "candidate_id": match["candidate_id"], "value": value})
+        item = self.repo.put(
+            "feedback",
+            {
+                "id": self._id(),
+                "match_id": match_id,
+                "candidate_id": match["candidate_id"],
+                "value": value,
+            },
+        )
         self.repo.audit("match.feedback", "match", match_id, actor, {"value": value})
         return item
 
@@ -252,7 +305,9 @@ class AgentService:
         )
         return approval
 
-    def preview_digest(self, candidate_id: str, match_ids: list[str], actor: str, base_url: str) -> dict[str, Any]:
+    def preview_digest(
+        self, candidate_id: str, match_ids: list[str], actor: str, base_url: str
+    ) -> dict[str, Any]:
         candidate = self._required("candidate", candidate_id)
         if candidate.get("consent_status") != "opted_in":
             raise PolicyError("candidate is not opted in")
@@ -268,26 +323,47 @@ class AgentService:
             job = self._required("job", match["job_id"])
             if hard_filter(candidate, job):
                 raise PolicyError(f"job {job['id']} is no longer eligible")
-            entries.append({"match_id": match_id, "job_id": job["id"], "title": job["title_original"], "company": job["company_name"], "score": match["score"], "reasons": match["reasons"], "canonical_url": job["canonical_url"]})
+            entries.append(
+                {
+                    "match_id": match_id,
+                    "job_id": job["id"],
+                    "title": job["title_original"],
+                    "company": job["company_name"],
+                    "score": match["score"],
+                    "reasons": match["reasons"],
+                    "canonical_url": job["canonical_url"],
+                }
+            )
         notification_id = self._id()
         draft = {
-            "id": notification_id, "candidate_id": candidate_id, "match_ids": match_ids,
-            "job_ids": [x["job_id"] for x in entries], "entries": entries, "status": "pending_approval",
+            "id": notification_id,
+            "candidate_id": candidate_id,
+            "match_ids": match_ids,
+            "job_ids": [x["job_id"] for x in entries],
+            "entries": entries,
+            "status": "pending_approval",
             "subject": f"为你找到 {len(entries)} 个新的远程兼职机会",
             "unsubscribe_url": f"{base_url}/unsubscribe?candidate_id={candidate_id}",
-            "report_base_url": f"{base_url}/jobs", "rule_version": RULE_VERSION,
+            "report_base_url": f"{base_url}/jobs",
+            "rule_version": RULE_VERSION,
         }
         self.repo.put("notification", draft)
         self.repo.audit("notification.previewed", "notification", notification_id, actor)
         return draft
 
-    def review_notification(self, notification_id: str, approved: bool, actor: str) -> dict[str, Any]:
+    def review_notification(
+        self, notification_id: str, approved: bool, actor: str
+    ) -> dict[str, Any]:
         item = self._required("notification", notification_id)
         if item["status"] != "pending_approval":
             raise PolicyError("only pending drafts can be reviewed")
-        item.update(status="approved" if approved else "rejected", reviewed_by=actor, reviewed_at=utcnow())
+        item.update(
+            status="approved" if approved else "rejected", reviewed_by=actor, reviewed_at=utcnow()
+        )
         self.repo.put("notification", item)
-        self.repo.audit("notification.reviewed", "notification", notification_id, actor, {"approved": approved})
+        self.repo.audit(
+            "notification.reviewed", "notification", notification_id, actor, {"approved": approved}
+        )
         return item
 
     def send_notification(self, notification_id: str, actor: str) -> dict[str, Any]:
@@ -303,14 +379,27 @@ class AgentService:
         if candidate.get("notification_frequency") == "paused":
             raise PolicyError("candidate notifications are paused")
         today = utcnow()[:10]
-        already_today = [x for x in self.repo.list("notification") if x.get("candidate_id") == candidate["id"] and x.get("status") == "sent" and x.get("sent_at", "")[:10] == today]
+        already_today = [
+            x
+            for x in self.repo.list("notification")
+            if x.get("candidate_id") == candidate["id"]
+            and x.get("status") == "sent"
+            and x.get("sent_at", "")[:10] == today
+        ]
         if already_today:
             raise PolicyError("daily notification limit reached")
         for job_id in item["job_ids"]:
             job = self._required("job", job_id)
             if hard_filter(candidate, job):
                 raise PolicyError(f"job {job_id} failed final eligibility check")
-        item.update(status="sent", sent_at=utcnow(), provider="simulation", provider_message_id=f"sim-{self._id()}")
+        item.update(
+            status="sent",
+            sent_at=utcnow(),
+            provider="simulation",
+            provider_message_id=f"sim-{self._id()}",
+        )
         self.repo.put("notification", item)
-        self.repo.audit("notification.sent", "notification", notification_id, actor, {"provider": "simulation"})
+        self.repo.audit(
+            "notification.sent", "notification", notification_id, actor, {"provider": "simulation"}
+        )
         return item

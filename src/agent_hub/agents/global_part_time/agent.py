@@ -12,7 +12,7 @@ from ...core.contracts import (
     ExecutionContext,
     InvalidInvocationError,
 )
-from .repository import Repository
+from .repository import RepositoryProtocol
 from .service import AgentService
 
 
@@ -75,7 +75,7 @@ class GlobalPartTimeAgent:
         ),
     )
 
-    def __init__(self, service: AgentService, repository: Repository):
+    def __init__(self, service: AgentService, repository: RepositoryProtocol):
         self.service = service
         self.repository = repository
 
@@ -88,9 +88,7 @@ class GlobalPartTimeAgent:
         handlers: dict[str, Callable[[], dict[str, Any]]] = {
             "list_sources": lambda: self._list_sources(payload),
             "sync_source": lambda: self._sync_source(payload, context),
-            "validate_job": lambda: self._validation_result(
-                self._required(payload, "job_id", str)
-            ),
+            "validate_job": lambda: self._validation_result(self._required(payload, "job_id", str)),
             "find_matches": lambda: self.service.run_matches(
                 self._required(payload, "candidate_id", str),
                 context.actor,
@@ -137,9 +135,7 @@ class GlobalPartTimeAgent:
             "rule_version": job["rule_version"],
         }
 
-    def _sync_source(
-        self, payload: dict[str, Any], context: ExecutionContext
-    ) -> dict[str, Any]:
+    def _sync_source(self, payload: dict[str, Any], context: ExecutionContext) -> dict[str, Any]:
         source_id = self._required(payload, "source_id", str)
         jobs = self._required(payload, "jobs", list)
         if not all(isinstance(job, dict) for job in jobs):
@@ -178,7 +174,5 @@ class GlobalPartTimeAgent:
         if value is None:
             raise InvalidInvocationError(f"payload.{field} is required")
         if expected_type is not None and not isinstance(value, expected_type):
-            raise InvalidInvocationError(
-                f"payload.{field} must be {expected_type.__name__}"
-            )
+            raise InvalidInvocationError(f"payload.{field} must be {expected_type.__name__}")
         return value

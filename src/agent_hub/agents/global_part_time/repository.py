@@ -1,7 +1,7 @@
 """兼职 Agent 的持久化边界和 SQLite MVP 实现。
 
-Repository 是领域服务唯一接触存储的位置。未来切换 PostgreSQL 时，只需提供
-相同接口的实现，不必修改平台注册表、HTTP 路由或匹配规则。
+Repository 是领域服务唯一接触存储的位置。PostgreSQL 实现位于
+``agent_hub.database.repository``，通过组合根按环境选择。
 """
 
 from __future__ import annotations
@@ -11,7 +11,8 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Protocol, runtime_checkable
+
 
 from .domain import utcnow
 
@@ -46,8 +47,37 @@ CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_kind, entity_id
 """
 
 
-class Repository:
+@runtime_checkable
+class RepositoryProtocol(Protocol):
+    """Storage contract shared by SQLite and PostgreSQL implementations."""
+
+    def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]: ...
+
+    def get(self, kind: str, entity_id: str) -> dict[str, Any] | None: ...
+
+    def list(self, kind: str) -> list[dict[str, Any]]: ...
+
+    def delete(self, kind: str, entity_id: str) -> None: ...
+
+    def audit(
+        self,
+        event: str,
+        kind: str,
+        entity_id: str,
+        actor: str,
+        details: dict[str, Any] | None = None,
+    ) -> None: ...
+
+    def audits(self, limit: int = 100) -> list[dict[str, Any]]: ...
+
+    def idempotent(
+        self, action: str, key: str, operation: Callable[[], dict[str, Any]]
+    ) -> dict[str, Any]: ...
+
+
+class SQLiteRepository:
     """以 JSON 实体保存 MVP 数据，并单独维护审计和幂等记录。"""
+
     def __init__(self, path: str | None = None):
         self.path = path or os.getenv("DATABASE_PATH", "./data/agent.db")
         if self.path != ":memory:":
@@ -105,12 +135,24 @@ class Repository:
             conn.execute("DELETE FROM entities WHERE kind=? AND id=?", (kind, entity_id))
 
     def audit(
-        self, event: str, kind: str, entity_id: str, actor: str, details: dict[str, Any] | None = None
+        self,
+        event: str,
+        kind: str,
+        entity_id: str,
+        actor: str,
+        details: dict[str, Any] | None = None,
     ) -> None:
         with self.connection() as conn:
             conn.execute(
                 "INSERT INTO audit_logs(event,entity_kind,entity_id,actor,details,created_at) VALUES(?,?,?,?,?,?)",
-                (event, kind, entity_id, actor, json.dumps(details or {}, ensure_ascii=False), utcnow()),
+                (
+                    event,
+                    kind,
+                    entity_id,
+                    actor,
+                    json.dumps(details or {}, ensure_ascii=False),
+                    utcnow(),
+                ),
             )
 
     def audits(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -120,7 +162,9 @@ class Repository:
             ).fetchall()
         return [{**dict(row), "details": json.loads(row["details"])} for row in rows]
 
-    def idempotent(self, action: str, key: str, operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    def idempotent(
+        self, action: str, key: str, operation: Callable[[], dict[str, Any]]
+    ) -> dict[str, Any]:
         """返回同一动作/键的首次结果，避免普通重试制造重复业务记录。
 
         生产实现应在 PostgreSQL 事务中锁定幂等键，从而覆盖并发请求；SQLite
@@ -145,3 +189,7 @@ class Repository:
                 ).fetchone()
                 return json.loads(row[0])
         return result
+
+
+# Backward-compatible alias so existing imports continue to work.
+Repository = SQLiteRepository

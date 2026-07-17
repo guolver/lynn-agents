@@ -12,7 +12,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, Header, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-from .repository import Repository
+from .repository import RepositoryProtocol
 from .service import AgentService
 
 
@@ -107,8 +107,12 @@ class CandidateCreate(APIModel):
     desired_roles: list[str] = Field(default_factory=list)
     minimum_hourly_rate: Money | None = None
     availability_hours_per_week: int = Field(ge=0, le=168)
-    allowed_work_modes: list[Literal["remote", "hybrid", "onsite"]] = Field(default_factory=lambda: ["remote"])
-    notification_channels: list[Literal["email", "telegram", "in_app"]] = Field(default_factory=lambda: ["email"])
+    allowed_work_modes: list[Literal["remote", "hybrid", "onsite"]] = Field(
+        default_factory=lambda: ["remote"]
+    )
+    notification_channels: list[Literal["email", "telegram", "in_app"]] = Field(
+        default_factory=lambda: ["email"]
+    )
     notification_frequency: Literal["daily", "weekly", "paused"] = "daily"
     excluded_companies: list[str] = Field(default_factory=list)
 
@@ -164,7 +168,7 @@ Actor = Annotated[str, Header(alias="X-Actor", min_length=1, max_length=200)]
 router = APIRouter(prefix="/api/v1", tags=["global-part-time-legacy"])
 
 
-def get_repository(request: Request) -> Repository:
+def get_repository(request: Request) -> RepositoryProtocol:
     """从当前应用读取仓储，避免多个 app/测试实例共享模块级可变状态。"""
     return request.app.state.part_time_repository
 
@@ -173,7 +177,7 @@ def get_service(request: Request) -> AgentService:
     return request.app.state.part_time_service
 
 
-RepositoryDep = Annotated[Repository, Depends(get_repository)]
+RepositoryDep = Annotated[RepositoryProtocol, Depends(get_repository)]
 ServiceDep = Annotated[AgentService, Depends(get_service)]
 
 
@@ -181,14 +185,17 @@ def dump(model: BaseModel, *, exclude_none: bool = False) -> dict[str, Any]:
     return model.model_dump(mode="json", exclude_none=exclude_none)
 
 
-def once(repository: Repository, action: str, key: str, operation: Any) -> dict[str, Any]:
+def once(repository: RepositoryProtocol, action: str, key: str, operation: Any) -> dict[str, Any]:
     return repository.idempotent(action, key, operation)
 
 
 @router.post("/sources", status_code=201)
 def create_source(
-    body: SourceCreate, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    body: SourceCreate,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
     return once(repository, "source.create", key, lambda: service.create_source(dump(body), actor))
 
@@ -200,19 +207,37 @@ def list_sources(repository: RepositoryDep) -> list[dict[str, Any]]:
 
 @router.post("/sources/{source_id}/review")
 def review_source(
-    source_id: str, body: ReviewRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    source_id: str,
+    body: ReviewRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"source.review:{source_id}", key, lambda: service.review_source(source_id, body.approved, actor, body.note))
+    return once(
+        repository,
+        f"source.review:{source_id}",
+        key,
+        lambda: service.review_source(source_id, body.approved, actor, body.note),
+    )
 
 
 @router.post("/sources/{source_id}/sync")
 def sync_source(
-    source_id: str, body: SyncRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    source_id: str,
+    body: SyncRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
     jobs = [dump(job) for job in body.jobs]
-    return once(repository, f"source.sync:{source_id}", key, lambda: service.sync_source(source_id, jobs, actor))
+    return once(
+        repository,
+        f"source.sync:{source_id}",
+        key,
+        lambda: service.sync_source(source_id, jobs, actor),
+    )
 
 
 @router.get("/jobs")
@@ -220,7 +245,12 @@ def list_jobs(
     repository: RepositoryDep, status: str | None = None, review_status: str | None = None
 ) -> list[dict[str, Any]]:
     jobs = repository.list("job")
-    return [job for job in jobs if (not status or job.get("status") == status) and (not review_status or job.get("review_status") == review_status)]
+    return [
+        job
+        for job in jobs
+        if (not status or job.get("status") == status)
+        and (not review_status or job.get("review_status") == review_status)
+    ]
 
 
 @router.get("/jobs/{job_id}")
@@ -230,26 +260,49 @@ def get_job(job_id: str, service: ServiceDep) -> dict[str, Any]:
 
 @router.post("/jobs/{job_id}/review")
 def review_job(
-    job_id: str, body: ReviewRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    job_id: str,
+    body: ReviewRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"job.review:{job_id}", key, lambda: service.review_job(job_id, body.approved, actor, body.note))
+    return once(
+        repository,
+        f"job.review:{job_id}",
+        key,
+        lambda: service.review_job(job_id, body.approved, actor, body.note),
+    )
 
 
 @router.post("/jobs/{job_id}/report")
 def report_job(
-    job_id: str, body: ReportRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    job_id: str,
+    body: ReportRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"job.report:{job_id}", key, lambda: service.report_job(job_id, body.reason, actor))
+    return once(
+        repository,
+        f"job.report:{job_id}",
+        key,
+        lambda: service.report_job(job_id, body.reason, actor),
+    )
 
 
 @router.post("/candidates", status_code=201)
 def create_candidate(
-    body: CandidateCreate, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    body: CandidateCreate,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, "candidate.create", key, lambda: service.create_candidate(dump(body), actor))
+    return once(
+        repository, "candidate.create", key, lambda: service.create_candidate(dump(body), actor)
+    )
 
 
 @router.get("/candidates/{candidate_id}")
@@ -259,35 +312,69 @@ def get_candidate(candidate_id: str, service: ServiceDep) -> dict[str, Any]:
 
 @router.patch("/candidates/{candidate_id}/preferences")
 def update_candidate(
-    candidate_id: str, body: CandidatePreferences, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    candidate_id: str,
+    body: CandidatePreferences,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
     changes = body.model_dump(mode="json", exclude_unset=True)
-    return once(repository, f"candidate.update:{candidate_id}", key, lambda: service.update_candidate(candidate_id, changes, actor))
+    return once(
+        repository,
+        f"candidate.update:{candidate_id}",
+        key,
+        lambda: service.update_candidate(candidate_id, changes, actor),
+    )
 
 
 @router.post("/candidates/{candidate_id}/consent")
 def set_consent(
-    candidate_id: str, body: ConsentRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    candidate_id: str,
+    body: ConsentRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"candidate.consent:{candidate_id}", key, lambda: service.set_consent(candidate_id, body.opted_in, actor, body.policy_version))
+    return once(
+        repository,
+        f"candidate.consent:{candidate_id}",
+        key,
+        lambda: service.set_consent(candidate_id, body.opted_in, actor, body.policy_version),
+    )
 
 
 @router.delete("/candidates/{candidate_id}")
 def delete_candidate(
-    candidate_id: str, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    candidate_id: str,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"candidate.delete:{candidate_id}", key, lambda: service.delete_candidate(candidate_id, actor))
+    return once(
+        repository,
+        f"candidate.delete:{candidate_id}",
+        key,
+        lambda: service.delete_candidate(candidate_id, actor),
+    )
 
 
 @router.post("/matches/run")
 def run_matches(
-    body: MatchRunRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    body: MatchRunRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"matches.run:{body.candidate_id}", key, lambda: service.run_matches(body.candidate_id, actor, body.limit))
+    return once(
+        repository,
+        f"matches.run:{body.candidate_id}",
+        key,
+        lambda: service.run_matches(body.candidate_id, actor, body.limit),
+    )
 
 
 @router.get("/candidates/{candidate_id}/matches")
@@ -297,43 +384,85 @@ def candidate_matches(candidate_id: str, service: ServiceDep) -> list[dict[str, 
 
 @router.post("/matches/{match_id}/feedback")
 def match_feedback(
-    match_id: str, body: FeedbackRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    match_id: str,
+    body: FeedbackRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"match.feedback:{match_id}", key, lambda: service.feedback(match_id, body.value, actor))
+    return once(
+        repository,
+        f"match.feedback:{match_id}",
+        key,
+        lambda: service.feedback(match_id, body.value, actor),
+    )
 
 
 @router.post("/notifications/preview", status_code=201)
 def preview_digest(
-    body: DigestPreviewRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    body: DigestPreviewRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
     base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
-    return once(repository, f"notification.preview:{body.candidate_id}", key, lambda: service.preview_digest(body.candidate_id, body.match_ids, actor, base_url))
+    return once(
+        repository,
+        f"notification.preview:{body.candidate_id}",
+        key,
+        lambda: service.preview_digest(body.candidate_id, body.match_ids, actor, base_url),
+    )
 
 
 @router.post("/notifications/{notification_id}/review")
 def review_notification(
-    notification_id: str, body: ReviewRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    notification_id: str,
+    body: ReviewRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"notification.review:{notification_id}", key, lambda: service.review_notification(notification_id, body.approved, actor))
+    return once(
+        repository,
+        f"notification.review:{notification_id}",
+        key,
+        lambda: service.review_notification(notification_id, body.approved, actor),
+    )
 
 
 @router.post("/notifications/send")
 def send_notification(
-    body: NotificationSendRequest, key: IdempotencyKey, actor: Actor,
-    repository: RepositoryDep, service: ServiceDep,
+    body: NotificationSendRequest,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
 ) -> dict[str, Any]:
-    return once(repository, f"notification.send:{body.notification_id}", key, lambda: service.send_notification(body.notification_id, actor))
+    return once(
+        repository,
+        f"notification.send:{body.notification_id}",
+        key,
+        lambda: service.send_notification(body.notification_id, actor),
+    )
 
 
 @router.post("/unsubscribe")
 def unsubscribe(
-    body: UnsubscribeRequest, key: IdempotencyKey,
-    repository: RepositoryDep, service: ServiceDep, actor: Actor = "self-service",
+    body: UnsubscribeRequest,
+    key: IdempotencyKey,
+    repository: RepositoryDep,
+    service: ServiceDep,
+    actor: Actor = "self-service",
 ) -> dict[str, Any]:
-    return once(repository, f"candidate.unsubscribe:{body.candidate_id}", key, lambda: service.set_consent(body.candidate_id, False, actor, "unsubscribe"))
+    return once(
+        repository,
+        f"candidate.unsubscribe:{body.candidate_id}",
+        key,
+        lambda: service.set_consent(body.candidate_id, False, actor, "unsubscribe"),
+    )
 
 
 @router.get("/audit")
