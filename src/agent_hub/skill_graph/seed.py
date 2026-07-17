@@ -85,7 +85,7 @@ SKILL_GRAPH_SEED: dict[str, dict] = {
             "AWS": ["Amazon Web Services", "aws"],
             "GCP": ["Google Cloud Platform", "Google Cloud", "gcp"],
             "Azure": ["azure", "Microsoft Azure"],
-            "Terraform": ["TF", "terraform"],
+            "Terraform": ["terraform"],
             "Docker": ["docker"],
         },
     },

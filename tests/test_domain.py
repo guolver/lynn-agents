@@ -107,6 +107,24 @@ class SkillScoreExpansionTest(unittest.TestCase):
         # Python direct (1.0) + 前端开发 indirect (0.6) → (1.0 + 0.6) / 2 = 0.8
         self.assertAlmostEqual(breakdown["skills"], 0.8, places=2)
 
+    def test_skill_score_expands_job_aliases_symmetrically(self):
+        candidate = {"skills": [{"name": "Kubernetes"}]}
+        job = {"skills": ["K8s"]}
+
+        def mock_expand(names):
+            mapping = {
+                "Kubernetes": {"Kubernetes", "容器与云"},
+                "K8s": {"Kubernetes", "容器与云"},
+            }
+            result = set()
+            for name in names:
+                result.update(mapping.get(name, set()))
+            return result
+
+        _, breakdown, _ = score_match(candidate, job, expand_fn=mock_expand)
+
+        self.assertEqual(breakdown["skills"], 0.6)
+
     def test_score_match_reasons_include_skill_expansion(self):
         candidate = {
             "consent_status": "opted_in",

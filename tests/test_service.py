@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from agent_hub.agents.global_part_time.repository import Repository
 from agent_hub.agents.global_part_time.service import AgentService, PolicyError
@@ -127,6 +128,55 @@ class ServiceWorkflowTest(unittest.TestCase):
 
         self.assertEqual(second["id"], first["id"])
         self.assertEqual(len(self.repo.list("match")), 1)
+
+    def test_match_run_falls_back_when_skill_graph_expansion_fails(self):
+        self.service.review_source(self.source["id"], True, "operator")
+        self.service.sync_source(self.source["id"], [self.job], "worker")
+        candidate = self.candidate()
+
+        def unavailable_graph(_names):
+            raise RuntimeError("neo4j unavailable")
+
+        self.service.expand_fn = unavailable_graph
+        with self.assertLogs("agent_hub.agents.global_part_time.service", level="WARNING") as logs:
+            result = self.service.run_matches(candidate["id"], "scheduler")
+
+        self.assertEqual(result["matches"][0]["score_breakdown"]["skills"], 1.0)
+        self.assertTrue(any("neo4j unavailable" in message for message in logs.output))
+
+    def test_partial_skill_expansion_failure_discards_graph_scores(self):
+        self.service.review_source(self.source["id"], True, "operator")
+        graph_job = dict(self.job, skills=["前端开发", "后端开发"])
+        self.service.sync_source(self.source["id"], [graph_job], "worker")
+        candidate = self.candidate()
+        candidate["skills"] = [{"name": "React"}]
+        self.repo.put("candidate", candidate)
+        calls = 0
+
+        def partially_available_graph(_names):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                raise RuntimeError("graph failed mid-score")
+            return {"React", "前端开发"}
+
+        self.service.expand_fn = partially_available_graph
+        with self.assertLogs("agent_hub.agents.global_part_time.service", level="WARNING"):
+            result = self.service.run_matches(candidate["id"], "scheduler")
+
+        self.assertEqual(result["matches"][0]["score_breakdown"]["skills"], 0.0)
+
+    def test_match_run_does_not_mask_scoring_failures(self):
+        self.service.review_source(self.source["id"], True, "operator")
+        self.service.sync_source(self.source["id"], [self.job], "worker")
+        candidate = self.candidate()
+
+        with patch(
+            "agent_hub.agents.global_part_time.service.score_match",
+            side_effect=RuntimeError("scoring bug"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "scoring bug"):
+                self.service.run_matches(candidate["id"], "scheduler")
 
     def test_unsubscribe_is_immediate_and_deletion_removes_personal_data(self):
         candidate = self.candidate()

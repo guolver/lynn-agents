@@ -6,11 +6,16 @@ async function render(pathname) {
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
-  return worker.fetch(
-    new Request(`http://localhost${pathname}`, { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
+  try {
+    return await worker.fetch(
+      new Request(`http://localhost${pathname}`, { headers: { accept: "text/html" } }),
+      { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+      { waitUntil() {}, passThroughOnException() {} },
+    );
+  } catch {
+    // Cloudflare converts an uncaught Worker exception into an HTTP 500 response.
+    return new Response("Internal Server Error", { status: 500 });
+  }
 }
 
 test("server-renders the Agent Hub dashboard", async () => {
@@ -60,7 +65,7 @@ test("does not substitute demo data when the live job API is unavailable", async
 
   try {
     const response = await render("/jobs/job_001");
-    assert.equal(response.status, 404);
+    assert.equal(response.status, 500);
   } finally {
     if (previousDemoMode === undefined) delete process.env.AGENT_HUB_DEMO_MODE;
     else process.env.AGENT_HUB_DEMO_MODE = previousDemoMode;

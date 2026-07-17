@@ -39,16 +39,13 @@ export function getJobs(): Promise<Job[]> {
 export async function getJob(jobId: string): Promise<Job | null> {
   if (DEMO_MODE) return demoJobs.find((job) => job.id === jobId) ?? null;
 
-  try {
-    const response = await fetch(`${API_URL}/api/v1/jobs/${jobId}`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(2500),
-    });
-    if (!response.ok) return null;
-    return (await response.json()) as Job;
-  } catch {
-    return null;
-  }
+  const response = await fetch(`${API_URL}/api/v1/jobs/${jobId}`, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(2500),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Job API request failed with status ${response.status}`);
+  return (await response.json()) as Job;
 }
 
 export function getAudits(): Promise<AuditEvent[]> {

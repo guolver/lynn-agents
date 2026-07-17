@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Callable
 
@@ -19,6 +20,9 @@ from .domain import (
     score_match,
     utcnow,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class NotFoundError(ValueError):
@@ -214,6 +218,24 @@ class AgentService:
     def run_matches(self, candidate_id: str, actor: str, limit: int = 50) -> dict[str, Any]:
         """先运行硬过滤，再为剩余职位生成版本化、可解释的匹配结果。"""
         candidate = self._required("candidate", candidate_id)
+        expansion_failed = False
+
+        def expand_skills(names: list[str]) -> set[str]:
+            nonlocal expansion_failed
+            if self.expand_fn is None or expansion_failed:
+                return set()
+            try:
+                return self.expand_fn(names)
+            except Exception as exc:
+                expansion_failed = True
+                logger.warning(
+                    "Skill graph expansion failed; using direct skill matching: %s",
+                    exc,
+                    exc_info=True,
+                )
+                return set()
+
+        expand_fn = expand_skills if self.expand_fn is not None else None
         existing_matches = {
             item["job_id"]: item
             for item in self.repo.list("match")
@@ -233,7 +255,9 @@ class AgentService:
             if failures:
                 filtered.append({"job_id": job["id"], "reasons": failures})
                 continue
-            score, breakdown, reasons = score_match(candidate, job, self.expand_fn)
+            score, breakdown, reasons = score_match(candidate, job, expand_fn)
+            if expansion_failed:
+                score, breakdown, reasons = score_match(candidate, job)
             match = {
                 "id": existing_matches.get(job["id"], {}).get("id", self._id()),
                 "candidate_id": candidate_id,

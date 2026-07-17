@@ -10,6 +10,23 @@ except Exception:
     pass
 
 
+class SeedAliasValidationTest(unittest.TestCase):
+    def test_aliases_are_globally_unique(self):
+        from agent_hub.skill_graph.seed import SKILL_GRAPH_SEED
+
+        owners: dict[str, str] = {}
+        for data in SKILL_GRAPH_SEED.values():
+            for canonical, aliases in data.get("aliases", {}).items():
+                for alias in aliases:
+                    normalized = alias.casefold()
+                    previous = owners.get(normalized)
+                    self.assertTrue(
+                        previous is None or previous == canonical,
+                        f"alias {alias!r} belongs to both {previous!r} and {canonical!r}",
+                    )
+                    owners[normalized] = canonical
+
+
 @unittest.skipUnless(NEO4J_AVAILABLE, "testcontainers[neo4j] or Docker not available")
 class Neo4jConfigTest(unittest.TestCase):
     @classmethod

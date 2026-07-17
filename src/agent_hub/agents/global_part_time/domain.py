@@ -190,17 +190,23 @@ def _skill_score(
     job: dict[str, Any],
     expand_fn: Callable[[list[str]], set[str]] | None = None,
 ) -> tuple[float, list[str], list[str]]:
-    required = {_norm(x) for x in job.get("skills") or []}
+    raw_required = list(job.get("skills") or [])
+    required = {_norm(x) for x in raw_required}
     if not required:
         return 0.5, [], []
     raw_owned = [x["name"] if isinstance(x, dict) else x for x in candidate.get("skills") or []]
     owned = {_norm(x) for x in raw_owned}
-    if expand_fn:
-        expanded = {_norm(x) for x in expand_fn(raw_owned)}
-    else:
-        expanded = set()
     direct_set = required & owned
-    indirect_set = (required & expanded) - direct_set
+    indirect_set: set[str] = set()
+    if expand_fn:
+        expanded_owned = owned | {_norm(x) for x in expand_fn(raw_owned)}
+        for raw_skill in raw_required:
+            normalized = _norm(raw_skill)
+            if normalized in direct_set:
+                continue
+            expanded_required = {normalized} | {_norm(x) for x in expand_fn([raw_skill])}
+            if expanded_owned & expanded_required:
+                indirect_set.add(normalized)
     direct = sorted(direct_set)
     indirect = sorted(indirect_set)
     score = (len(direct) + len(indirect) * 0.6) / len(required)
