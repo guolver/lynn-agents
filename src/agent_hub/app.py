@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import Iterable
 from typing import Any
 
@@ -11,18 +13,20 @@ from fastapi.responses import JSONResponse
 from .agents.global_part_time import http_api
 from .agents.global_part_time.agent import GlobalPartTimeAgent
 from .agents.global_part_time.repository import RepositoryProtocol
-from .database.config import create_repository
 from .agents.global_part_time.service import AgentService, NotFoundError, PolicyError
 from .api.platform import create_platform_router
 from .core.contracts import (
     ActionNotFoundError,
+    Agent,
     AgentNotFoundError,
     DuplicateAgentError,
     InvalidInvocationError,
-    Agent,
 )
 from .core.discovery import discover_agents
 from .core.registry import AgentRegistry
+from .database.config import create_repository
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -39,7 +43,21 @@ def create_app(
     """
 
     repo = repository or create_repository()
-    part_time_service = AgentService(repo)
+    expand_fn = None
+    neo4j_uri = os.getenv("NEO4J_URI")
+    if neo4j_uri:
+        try:
+            from .skill_graph.config import create_neo4j_driver
+            from .skill_graph.service import SkillGraphService
+
+            neo4j_driver = create_neo4j_driver(neo4j_uri)
+            skill_graph = SkillGraphService(neo4j_driver)
+            skill_graph.seed()
+            expand_fn = skill_graph.expand
+            logger.info("Skill graph initialized from Neo4j at %s", neo4j_uri)
+        except Exception:
+            logger.warning("Failed to initialize skill graph, continuing without it", exc_info=True)
+    part_time_service = AgentService(repo, expand_fn=expand_fn)
     registry = AgentRegistry()
     registry.register(GlobalPartTimeAgent(part_time_service, repo))
     for agent in extra_agents:

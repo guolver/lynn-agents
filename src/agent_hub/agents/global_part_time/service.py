@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from .repository import RepositoryProtocol
 from .domain import (
@@ -32,8 +32,13 @@ class PolicyError(ValueError):
 class AgentService:
     """实现职位采集、候选匹配、审批和通知的完整业务用例。"""
 
-    def __init__(self, repository: RepositoryProtocol):
+    def __init__(
+        self,
+        repository: RepositoryProtocol,
+        expand_fn: Callable[[list[str]], set[str]] | None = None,
+    ):
         self.repo = repository
+        self.expand_fn = expand_fn
 
     @staticmethod
     def _id() -> str:
@@ -228,7 +233,7 @@ class AgentService:
             if failures:
                 filtered.append({"job_id": job["id"], "reasons": failures})
                 continue
-            score, breakdown, reasons = score_match(candidate, job)
+            score, breakdown, reasons = score_match(candidate, job, self.expand_fn)
             match = {
                 "id": existing_matches.get(job["id"], {}).get("id", self._id()),
                 "candidate_id": candidate_id,
