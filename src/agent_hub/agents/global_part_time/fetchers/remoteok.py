@@ -8,9 +8,17 @@ from __future__ import annotations
 
 import json
 import re
+import ssl
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.request import Request, urlopen
+
+try:
+    import certifi
+
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = None
 
 
 class _TagStripper(HTMLParser):
@@ -96,7 +104,7 @@ def fetch(tags: list[str] | None = None, limit: int = 200) -> list[dict]:
         params = "&".join(f"tag={t}" for t in tags)
         url = f"{url}?{params}"
     request = Request(url, headers={"User-Agent": USER_AGENT})
-    with urlopen(request) as response:
+    with urlopen(request, context=_SSL_CONTEXT) as response:
         data = json.loads(response.read())
     # First element is always metadata (legal notice, timestamp, etc.)
     jobs = data[1:] if len(data) > 1 else []
