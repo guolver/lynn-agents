@@ -248,16 +248,25 @@ class AgentService:
             and notification.get("status") == "sent"
             for job_id in notification.get("job_ids", [])
         }
-        results = []
         filtered = []
+        eligible_jobs = []
         for job in self.repo.list("job"):
             failures = hard_filter(candidate, job, job["id"] in sent_job_ids)
             if failures:
                 filtered.append({"job_id": job["id"], "reasons": failures})
                 continue
-            score, breakdown, reasons = score_match(candidate, job, expand_fn)
+            eligible_jobs.append(job)
+
+        scored_jobs = []
+        for job in eligible_jobs:
+            scored_jobs.append((job, *score_match(candidate, job, expand_fn)))
             if expansion_failed:
-                score, breakdown, reasons = score_match(candidate, job)
+                break
+        if expansion_failed:
+            scored_jobs = [(job, *score_match(candidate, job)) for job in eligible_jobs]
+
+        results = []
+        for job, score, breakdown, reasons in scored_jobs:
             match = {
                 "id": existing_matches.get(job["id"], {}).get("id", self._id()),
                 "candidate_id": candidate_id,

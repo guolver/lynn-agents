@@ -166,6 +166,70 @@ class ServiceWorkflowTest(unittest.TestCase):
 
         self.assertEqual(result["matches"][0]["score_breakdown"]["skills"], 0.0)
 
+    def test_batch_discards_all_graph_scores_when_later_job_expansion_fails(self):
+        for reverse_order in (False, True):
+            with self.subTest(reverse_order=reverse_order):
+                repo = Repository(":memory:")
+                service = AgentService(repo)
+                source = service.create_source(source_payload(), "operator")
+                service.review_source(source["id"], True, "operator")
+                jobs = [
+                    dict(
+                        job_payload(),
+                        source_job_id="frontend-job",
+                        canonical_url="https://feed.example.com/jobs/frontend",
+                        title_original="Frontend Specialist",
+                        skills=["前端开发"],
+                    ),
+                    dict(
+                        job_payload(),
+                        source_job_id="backend-job",
+                        canonical_url="https://feed.example.com/jobs/backend",
+                        title_original="Backend Specialist",
+                        skills=["后端开发"],
+                    ),
+                ]
+                imported = service.sync_source(source["id"], jobs, "worker")
+                candidate = service.create_candidate(candidate_payload(), "candidate")
+                candidate["skills"] = [{"name": "React"}]
+                repo.put("candidate", candidate)
+                candidate = service.set_consent(candidate["id"], True, "candidate", "mvp-1")
+                ordered_ids = list(imported["job_ids"])
+                if reverse_order:
+                    ordered_ids.reverse()
+                jobs_by_id = {job["id"]: job for job in repo.list("job")}
+                original_list = repo.list
+
+                def list_in_order(kind):
+                    if kind == "job":
+                        return [jobs_by_id[job_id] for job_id in ordered_ids]
+                    return original_list(kind)
+
+                calls = 0
+
+                def graph_fails_on_second_job(_names):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 3:
+                        raise RuntimeError("graph failed on second job")
+                    return {"React", "前端开发", "后端开发"}
+
+                service.expand_fn = graph_fails_on_second_job
+                with (
+                    patch.object(repo, "list", side_effect=list_in_order),
+                    self.assertLogs("agent_hub.agents.global_part_time.service", level="WARNING"),
+                ):
+                    result = service.run_matches(candidate["id"], "scheduler")
+
+                self.assertEqual(
+                    [match["score_breakdown"]["skills"] for match in result["matches"]],
+                    [0.0, 0.0],
+                )
+                self.assertEqual(
+                    [match["score_breakdown"]["skills"] for match in repo.list("match")],
+                    [0.0, 0.0],
+                )
+
     def test_match_run_does_not_mask_scoring_failures(self):
         self.service.review_source(self.source["id"], True, "operator")
         self.service.sync_source(self.source["id"], [self.job], "worker")
