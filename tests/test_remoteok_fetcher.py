@@ -1,8 +1,10 @@
 """Tests for the RemoteOK fetcher module."""
 
+import json
 import unittest
+from unittest.mock import MagicMock, patch
 
-from agent_hub.agents.global_part_time.fetchers.remoteok import strip_html, map_job
+from agent_hub.agents.global_part_time.fetchers.remoteok import fetch, map_job, strip_html
 
 
 class StripHtmlTest(unittest.TestCase):
@@ -139,3 +141,74 @@ class MapJobLocationTest(unittest.TestCase):
         raw = {k: v for k, v in SAMPLE_RAW.items() if k != "location"}
         result = map_job(raw)
         self.assertEqual(result["countries_allowed"], ["GLOBAL"])
+
+
+METADATA = {"legal": "https://remoteok.com/legal"}
+
+MOCK_API_RESPONSE = json.dumps(
+    [
+        METADATA,
+        {
+            "id": "111",
+            "slug": "job-1",
+            "company": "Alpha",
+            "position": "Dev",
+            "description": "desc",
+            "location": "Worldwide",
+            "tags": ["python"],
+            "salary_min": 0,
+            "salary_max": 0,
+            "url": "https://remoteok.com/remote-jobs/111",
+            "apply_url": "",
+            "epoch": 1752700800,
+        },
+        {
+            "id": "222",
+            "slug": "job-2",
+            "company": "Beta",
+            "position": "Designer",
+            "description": "design",
+            "location": "USA",
+            "tags": ["figma"],
+            "salary_min": 80000,
+            "salary_max": 100000,
+            "url": "https://remoteok.com/remote-jobs/222",
+            "apply_url": "",
+            "epoch": 1752700800,
+        },
+    ]
+).encode()
+
+
+def _mock_urlopen(response_bytes: bytes):
+    """Return a mock that behaves like urllib.request.urlopen context manager."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = response_bytes
+    mock_response.__enter__ = lambda s: s
+    mock_response.__exit__ = MagicMock(return_value=False)
+    return mock_response
+
+
+class FetchTest(unittest.TestCase):
+    @patch("agent_hub.agents.global_part_time.fetchers.remoteok.urlopen")
+    def test_skips_metadata_element(self, mock_urlopen_fn):
+        mock_urlopen_fn.return_value = _mock_urlopen(MOCK_API_RESPONSE)
+        jobs = fetch()
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(jobs[0]["id"], "111")
+        self.assertEqual(jobs[1]["id"], "222")
+
+    @patch("agent_hub.agents.global_part_time.fetchers.remoteok.urlopen")
+    def test_limit_truncates(self, mock_urlopen_fn):
+        mock_urlopen_fn.return_value = _mock_urlopen(MOCK_API_RESPONSE)
+        jobs = fetch(limit=1)
+        self.assertEqual(len(jobs), 1)
+
+    @patch("agent_hub.agents.global_part_time.fetchers.remoteok.urlopen")
+    def test_tags_appended_to_url(self, mock_urlopen_fn):
+        mock_urlopen_fn.return_value = _mock_urlopen(MOCK_API_RESPONSE)
+        fetch(tags=["python", "react"])
+        call_args = mock_urlopen_fn.call_args
+        request = call_args[0][0]
+        self.assertIn("tag=python", request.full_url)
+        self.assertIn("tag=react", request.full_url)

@@ -6,9 +6,11 @@ Uses stdlib exclusively (urllib, html.parser, json).
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+from urllib.request import Request, urlopen
 
 
 class _TagStripper(HTMLParser):
@@ -77,3 +79,25 @@ def map_job(raw: dict) -> dict:
         "quality_score": 0.7,
         "extraction_confidence": 0.6,
     }
+
+
+API_URL = "https://remoteok.com/api"
+USER_AGENT = "AgentHub/0.2 (+https://github.com/agent-hub)"
+
+
+def fetch(tags: list[str] | None = None, limit: int = 200) -> list[dict]:
+    """Fetch raw job listings from the RemoteOK public API.
+
+    The API returns a JSON array whose first element is metadata — it is
+    skipped.  Results are truncated to *limit*.
+    """
+    url = API_URL
+    if tags:
+        params = "&".join(f"tag={t}" for t in tags)
+        url = f"{url}?{params}"
+    request = Request(url, headers={"User-Agent": USER_AGENT})
+    with urlopen(request) as response:
+        data = json.loads(response.read())
+    # First element is always metadata (legal notice, timestamp, etc.)
+    jobs = data[1:] if len(data) > 1 else []
+    return jobs[:limit]
