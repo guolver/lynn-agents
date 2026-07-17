@@ -10,7 +10,8 @@ from fastapi.responses import JSONResponse
 
 from .agents.global_part_time import http_api
 from .agents.global_part_time.agent import GlobalPartTimeAgent
-from .agents.global_part_time.repository import Repository
+from .agents.global_part_time.repository import RepositoryProtocol
+from .database.config import create_repository
 from .agents.global_part_time.service import AgentService, NotFoundError, PolicyError
 from .api.platform import create_platform_router
 from .core.contracts import (
@@ -25,7 +26,7 @@ from .core.registry import AgentRegistry
 
 
 def create_app(
-    repository: Repository | None = None,
+    repository: RepositoryProtocol | None = None,
     *,
     extra_agents: Iterable[Agent] = (),
     load_plugins: bool = False,
@@ -37,7 +38,7 @@ def create_app(
     测试也可以传入内存仓储，避免隐式修改全局数据库。
     """
 
-    repo = repository or Repository()
+    repo = repository or create_repository()
     part_time_service = AgentService(repo)
     registry = AgentRegistry()
     registry.register(GlobalPartTimeAgent(part_time_service, repo))
