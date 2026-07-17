@@ -1,47 +1,18 @@
 """RemoteOK public API fetcher and field mapper.
 
 Pure functions only — no dependency on service, repository, or framework.
-Uses stdlib exclusively (urllib, html.parser, json).
 """
 
 from __future__ import annotations
 
 import json
-import re
-import ssl
 from datetime import datetime, timezone
-from html.parser import HTMLParser
 from urllib.request import Request, urlopen
 
-try:
-    import certifi
+from . import _SSL_CONTEXT, strip_html
 
-    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-except ImportError:
-    _SSL_CONTEXT = None
-
-
-class _TagStripper(HTMLParser):
-    """Collect text nodes from an HTML fragment."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._parts: list[str] = []
-
-    def handle_data(self, data: str) -> None:
-        self._parts.append(data)
-
-    def get_text(self) -> str:
-        return " ".join(self._parts)
-
-
-def strip_html(html: str) -> str:
-    """Remove HTML tags and return collapsed plain text."""
-    stripper = _TagStripper()
-    stripper.feed(html)
-    text = stripper.get_text()
-    return re.sub(r"\s+", " ", text).strip()
-
+# Re-export so existing imports (tests, etc.) keep working.
+__all__ = ["strip_html", "map_job", "fetch"]
 
 HOURS_PER_WORK_YEAR = 2080
 
