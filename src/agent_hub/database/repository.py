@@ -58,7 +58,7 @@ _TYPED_COLUMNS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     },
     "job": lambda p: {
         "source_id": p.get("source_id", ""),
-        "dedup_key": p.get("dedup_key", ""),
+        "dedup_key": p.get("dedup_key") or p.get("id", ""),
         "title_original": p.get("title_original", ""),
         "company_name": p.get("company_name", ""),
         "status": p.get("status", "active"),
@@ -135,12 +135,13 @@ class PostgresRepository:
             if natural:
                 # Use savepoint for natural-key conflict resolution.
                 nk_values = {col: typed[col] for col in natural}
-                existing = session.execute(
-                    select(model_cls).filter_by(**nk_values)
-                ).scalar_one_or_none()
-                if existing is not None and existing.id != item["id"]:
-                    # Return the already-persisted record.
-                    return dict(existing.payload)
+                if all(nk_values.values()):
+                    existing = session.execute(
+                        select(model_cls).filter_by(**nk_values)
+                    ).scalar_one_or_none()
+                    if existing is not None and existing.id != item["id"]:
+                        # Return the already-persisted record.
+                        return dict(existing.payload)
 
             row = session.get(model_cls, item["id"])
             if row is not None:
