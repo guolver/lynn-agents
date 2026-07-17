@@ -4,8 +4,8 @@ module.exports = {
   // Python: ruff lint + format
   '*.py': (files) => {
     const cmds = [
-      `.venv/bin/ruff check --fix ${files.join(' ')}`,
-      `.venv/bin/ruff format ${files.join(' ')}`,
+      `ruff check --fix ${files.join(' ')}`,
+      `ruff format ${files.join(' ')}`,
     ];
     return cmds;
   },
