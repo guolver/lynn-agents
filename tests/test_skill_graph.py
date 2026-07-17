@@ -111,3 +111,67 @@ class SkillGraphServiceTest(unittest.TestCase):
         self.service.seed()
         self.service.seed()
         self.assertEqual(self.service.resolve("K8s"), "Kubernetes")
+
+
+@unittest.skipUnless(NEO4J_AVAILABLE, "testcontainers[neo4j] or Docker not available")
+class EndToEndSkillMatchTest(unittest.TestCase):
+    """Test the full flow: seed → expand → score_match."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.container = Neo4jContainer("neo4j:5")
+        cls.container.start()
+        bolt_url = cls.container.get_connection_url()
+        from agent_hub.skill_graph.config import create_neo4j_driver
+        from agent_hub.skill_graph.service import SkillGraphService
+
+        cls.driver = create_neo4j_driver(bolt_url, auth=("neo4j", "test"))
+        cls.service = SkillGraphService(cls.driver)
+        cls.service.seed()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.driver.close()
+        cls.container.stop()
+
+    def test_alias_improves_match_score(self):
+        from agent_hub.agents.global_part_time.domain import score_match
+
+        candidate = {"skills": [{"name": "K8s"}, {"name": "ReactJS"}]}
+        job = {"skills": ["Kubernetes", "React"]}
+
+        # Without expansion: no match (different strings)
+        _, breakdown_without, _ = score_match(candidate, job)
+        self.assertEqual(breakdown_without["skills"], 0.0)
+
+        # With expansion: aliases resolved
+        _, breakdown_with, reasons = score_match(candidate, job, expand_fn=self.service.expand)
+        self.assertGreater(breakdown_with["skills"], 0.0)
+
+    def test_category_expansion_enables_indirect_match(self):
+        from agent_hub.agents.global_part_time.domain import score_match
+
+        candidate = {"skills": [{"name": "React"}, {"name": "Vue"}]}
+        job = {"skills": ["前端开发"]}
+
+        # Without expansion: no match
+        _, breakdown_without, _ = score_match(candidate, job)
+        self.assertEqual(breakdown_without["skills"], 0.0)
+
+        # With expansion: React/Vue → 前端开发
+        _, breakdown_with, reasons = score_match(candidate, job, expand_fn=self.service.expand)
+        self.assertGreater(breakdown_with["skills"], 0.0)
+        has_expansion = any("扩展" in r or "相关" in r for r in reasons)
+        self.assertTrue(has_expansion, f"Expected expansion reason in {reasons}")
+
+    def test_direct_match_scores_higher_than_indirect(self):
+        from agent_hub.agents.global_part_time.domain import score_match
+
+        candidate = {"skills": [{"name": "Python"}, {"name": "React"}]}
+
+        # Job requires Python (direct) and 前端开发 (indirect via React)
+        job = {"skills": ["Python", "前端开发"]}
+        _, breakdown, _ = score_match(candidate, job, expand_fn=self.service.expand)
+
+        # Direct(Python)=1.0 + Indirect(前端开发)=0.6 → avg = 0.8
+        self.assertAlmostEqual(breakdown["skills"], 0.8, places=1)
