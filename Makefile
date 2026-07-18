@@ -52,22 +52,22 @@ worker: ## 启动 Celery worker
 # — Docker 全栈 ————————————————————————————————————
 
 up: ## 全栈启动（前后端 + 基础设施）
-	docker compose -f compose.dev.yaml up -d --build --wait
+	docker compose up -d --build --wait
 
 down: ## 全栈停止
-	docker compose -f compose.dev.yaml down
+	docker compose down
 
 logs: ## 查看全栈日志
-	docker compose -f compose.dev.yaml logs -f
+	docker compose logs -f
 
 # — 基础设施 ————————————————————————————————————
 
 infra-up: infra ## 启动本地 PostgreSQL 和 Redis
 infra: ## 启动本地 PostgreSQL、Redis 和 Neo4j
-	docker compose -f compose.dev.yaml up -d --wait postgres redis neo4j
+	docker compose up -d --wait postgres redis neo4j
 
 infra-down: ## 停止基础设施（保留数据卷）
-	docker compose -f compose.dev.yaml down
+	docker compose down
 
 migrate: ## 应用数据库迁移
 	. .venv/bin/activate && DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@127.0.0.1:5432/agent_hub \
