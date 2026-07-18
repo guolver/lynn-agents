@@ -5,8 +5,23 @@ from agent_hub.agents.global_part_time.domain import (
     dedup_key,
     hard_filter,
     score_match,
+    score_match_with_evidence,
     timezone_matches,
 )
+from agent_hub.skill_graph.types import ExpansionEvidence, ExpansionResult
+
+
+def evidence(source, target, relations, nodes, weight, target_kind="skill", canonical=None):
+    return ExpansionEvidence(
+        source,
+        canonical or source,
+        target,
+        target_kind,
+        tuple(relations),
+        tuple(nodes),
+        len(relations),
+        weight,
+    )
 
 
 class DomainRulesTest(unittest.TestCase):
@@ -164,6 +179,136 @@ class SkillScoreExpansionTest(unittest.TestCase):
         score, breakdown, reasons = score_match(candidate, job, expand_fn=mock_expand)
         has_expansion_reason = any("扩展" in r or "相关" in r for r in reasons)
         self.assertTrue(has_expansion_reason, f"Expected expansion reason in {reasons}")
+
+
+class WeightedSkillEvidenceTest(unittest.TestCase):
+    def test_direct_and_alias_match_score_one(self):
+        # K8s canonicalizes to Kubernetes on the required side.
+        def expand(names):
+            values = []
+            for name in names:
+                canonical = "Kubernetes" if name == "K8s" else name
+                values.append(evidence(name, canonical, [], [canonical], 1.0, canonical=canonical))
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "Kubernetes"}]}, {"skills": ["K8s"]}, expand
+        )
+        self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(graph["requirements"][0]["score"], 1.0)
+
+    def test_requires_direction_and_weight(self):
+        # Only job-side Kubernetes expansion reaches candidate-owned Docker.
+        def expand(names):
+            values = [evidence(name, name, [], [name], 1.0) for name in names]
+            if names == ["Kubernetes"]:
+                values.append(
+                    evidence(
+                        "Kubernetes",
+                        "Docker",
+                        ["REQUIRES"],
+                        ["Kubernetes", "Docker"],
+                        0.75,
+                    )
+                )
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "Docker"}]}, {"skills": ["Kubernetes"]}, expand
+        )
+        self.assertEqual(breakdown["skills"], 0.75)
+        self.assertEqual(graph["requirements"][0]["path"]["relations"], ["REQUIRES"])
+
+    def test_related_and_two_hop_weights(self):
+        cases = [
+            (
+                "one hop",
+                evidence("React", "Vue", ["RELATED_TO"], ["React", "Vue"], 0.4),
+                0.4,
+            ),
+            (
+                "two hops",
+                evidence(
+                    "Next.js",
+                    "Vue",
+                    ["REQUIRES", "RELATED_TO"],
+                    ["Next.js", "React", "Vue"],
+                    0.2,
+                ),
+                0.2,
+            ),
+        ]
+        for label, path, expected in cases:
+            with self.subTest(label=label):
+
+                def expand(names):
+                    values = [evidence(name, name, [], [name], 1.0) for name in names]
+                    if names == [path.input_skill]:
+                        values.append(path)
+                    return ExpansionResult.from_iterable(values)
+
+                _, breakdown, _, graph = score_match_with_evidence(
+                    {"skills": [{"name": "Vue"}]},
+                    {"skills": [path.input_skill]},
+                    expand,
+                )
+                self.assertEqual(breakdown["skills"], expected)
+                self.assertEqual(graph["requirements"][0]["score"], expected)
+
+    def test_shared_category_does_not_match_two_concrete_skills(self):
+        def expand(names):
+            values = [evidence(name, name, [], [name], 1.0) for name in names]
+            for name in names:
+                if name in {"React", "Vue"}:
+                    values.append(
+                        evidence(
+                            name,
+                            "前端开发",
+                            ["CHILD_OF"],
+                            [name, "前端开发"],
+                            0.65,
+                            target_kind="category",
+                        )
+                    )
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "React"}]}, {"skills": ["Vue"]}, expand
+        )
+        self.assertEqual(breakdown["skills"], 0.0)
+        self.assertIsNone(graph["requirements"][0]["path"])
+
+    def test_tie_break_uses_weight_depth_then_lexical_path(self):
+        def expand(names):
+            values = [evidence(name, name, [], [name], 1.0) for name in names]
+            if names == ["Framework"]:
+                values.extend(
+                    [
+                        evidence(
+                            "Framework",
+                            "React",
+                            ["RELATED_TO", "RELATED_TO"],
+                            ["Framework", "Angular", "React"],
+                            0.2,
+                        ),
+                        evidence(
+                            "Framework",
+                            "React",
+                            ["RELATED_TO", "RELATED_TO"],
+                            ["Framework", "Vue", "React"],
+                            0.2,
+                        ),
+                    ]
+                )
+            return ExpansionResult.from_iterable(values)
+
+        _, _, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "React"}]}, {"skills": ["Framework"]}, expand
+        )
+        self.assertEqual(
+            graph["requirements"][0]["path"]["nodes"],
+            ["Framework", "Angular", "React"],
+        )
 
 
 if __name__ == "__main__":
