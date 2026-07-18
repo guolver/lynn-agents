@@ -75,9 +75,13 @@ const TOOL_LABELS: Record<string, string> = {
 export function ChatPanel({
   sessionId,
   onTitleUpdate,
+  initialPrompt,
+  initialAction,
 }: {
   sessionId: string;
   onTitleUpdate?: (title: string) => void;
+  initialPrompt?: string;
+  initialAction?: 'upload';
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -88,6 +92,7 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const initialFired = useRef(false);
 
   // Load history on mount. Tool messages carrying run_matches results are not
   // rendered directly; instead their match cards are re-attached to the
@@ -123,8 +128,14 @@ export function ChatPanel({
           });
         }
         setMessages(rebuilt);
+        if (rebuilt.length === 0 && !initialFired.current) {
+          initialFired.current = true;
+          if (initialPrompt) sendPrompt(initialPrompt);
+          else if (initialAction === 'upload') fileInputRef.current?.click();
+        }
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   // Auto-scroll
