@@ -14,7 +14,11 @@ const platformNav = [
 const businessNav = [
   { href: "/sources", label: "职位来源", glyph: "A" },
   { href: "/jobs", label: "职位中心", glyph: "B" },
-  { href: "/matches", label: "匹配与推荐", glyph: "C" },
+  { href: "/candidates", label: "候选人", glyph: "C" },
+  { href: "/matches", label: "匹配与推荐", glyph: "D" },
+  { href: "/notifications", label: "通知中心", glyph: "E" },
+  { href: "/workflows", label: "工作流", glyph: "F" },
+  { href: "/chat", label: "AI 助手", glyph: "G" },
 ];
 
 function NavGroup({ label, items }: { label: string; items: typeof platformNav }) {
