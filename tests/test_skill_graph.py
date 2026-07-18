@@ -243,4 +243,7 @@ class EndToEndSkillMatchTest(unittest.TestCase):
         path = evidence["requirements"][0]["path"]
         self.assertEqual(path["relations"], ["REQUIRES"])
         self.assertEqual(path["nodes"], ["Kubernetes", "Docker"])
-        self.assertTrue(any("Docker" in reason and "Kubernetes" in reason for reason in reasons))
+        self.assertEqual(
+            reasons[0],
+            "候选人技能Docker通过REQUIRES与职位要求Kubernetes匹配",
+        )
