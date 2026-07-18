@@ -12,6 +12,7 @@ from agent_hub.agents.global_part_time.service import AgentService
 from agent_hub.worker.celery_app import celery_app
 from agent_hub.worker.tasks import (
     WorkflowTask,
+    _embed_jobs,
     _make_idempotency_key,
     notification_pipeline_task,
     run_matches_task,
@@ -285,6 +286,56 @@ class TestRetryBehavior(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             sync_source_task.apply(args=[source["id"], [], "admin"]).get()
         self.assertIn("approved", str(ctx.exception).lower())
+
+
+class EmbedJobsTest(unittest.TestCase):
+    def test_skips_repo_without_vector_support(self):
+        repo = SQLiteRepository(":memory:")
+        result = _embed_jobs(repo, ["j1"])
+        self.assertEqual(result["embedded"], 0)
+        self.assertEqual(result["skipped"], "no_vector_support")
+
+    def test_batches_and_stores_vectors(self):
+        class FakeVectorRepo:
+            def __init__(self):
+                self.jobs = {
+                    f"j{i}": {"id": f"j{i}", "title_original": f"Job {i}"} for i in range(3)
+                }
+                self.stored = {}
+
+            def get(self, kind, job_id):
+                return self.jobs.get(job_id)
+
+            def update_job_embeddings(self, embeddings):
+                self.stored.update(embeddings)
+                return len(embeddings)
+
+        repo = FakeVectorRepo()
+        with patch(
+            "agent_hub.agents.global_part_time.embedding.get_embeddings",
+            side_effect=lambda texts: [[0.1, 0.2]] * len(texts),
+        ):
+            result = _embed_jobs(repo, list(repo.jobs))
+        self.assertEqual(result["embedded"], 3)
+        self.assertEqual(set(repo.stored), set(repo.jobs))
+
+    def test_total_api_failure_raises_for_retry(self):
+        class FakeVectorRepo:
+            def get(self, kind, job_id):
+                return {"id": job_id, "title_original": "Job"}
+
+            def update_job_embeddings(self, embeddings):
+                return len(embeddings)
+
+        with (
+            patch(
+                "agent_hub.agents.global_part_time.embedding.get_embeddings",
+                side_effect=lambda texts: [None] * len(texts),
+            ),
+            patch("agent_hub.agents.global_part_time.embedding.SILICONFLOW_API_KEY", "sk-test"),
+        ):
+            with self.assertRaises(RuntimeError):
+                _embed_jobs(FakeVectorRepo(), ["j1"])
 
 
 if __name__ == "__main__":

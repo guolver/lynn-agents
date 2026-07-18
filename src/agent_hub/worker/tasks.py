@@ -56,7 +56,9 @@ class WorkflowTask(Task):
             database_url = os.environ.get("DATABASE_URL")
             repo = create_repository(database_url=database_url)
             self.__class__._repo = repo
-            self.__class__._service = AgentService(repo)
+            from agent_hub.agents.global_part_time.embedding import get_embedding
+
+            self.__class__._service = AgentService(repo, embed_fn=get_embedding)
 
             # WorkflowTracker needs the SQLAlchemy engine (PostgreSQL only).
             if hasattr(repo, "_engine"):
@@ -169,7 +171,7 @@ def sync_source_task(
     workflow_run_id: str | None = None,
 ) -> dict[str, Any]:
     service, _repo, _tracker = self._get_service_and_tracker()
-    return _run_task(
+    result = _run_task(
         self,
         workflow_type="source_sync",
         step_name="sync_source",
@@ -179,6 +181,10 @@ def sync_source_task(
         workflow_run_id=workflow_run_id,
         payload={"source_id": source_id, "job_count": len(jobs)},
     )
+    job_ids = result.get("job_ids") or []
+    if job_ids and hasattr(_repo, "update_job_embeddings"):
+        embed_jobs_task.delay(job_ids, actor)
+    return result
 
 
 @celery_app.task(base=WorkflowTask, bind=True, name="agent_hub.worker.run_matches")
@@ -283,7 +289,7 @@ def fetch_and_sync_source_task(
         mapped = [map_fn(raw) for raw in raw_jobs]
         return service.sync_source(source_id, mapped, actor)
 
-    return _run_task(
+    result = _run_task(
         self,
         workflow_type="source_fetch_sync",
         step_name="fetch_and_sync_source",
@@ -293,6 +299,10 @@ def fetch_and_sync_source_task(
         workflow_run_id=workflow_run_id,
         payload={"source_id": source_id, "base_url": base_url},
     )
+    job_ids = result.get("job_ids") or []
+    if job_ids and hasattr(repo, "update_job_embeddings"):
+        embed_jobs_task.delay(job_ids, actor)
+    return result
 
 
 @celery_app.task(base=WorkflowTask, bind=True, name="agent_hub.worker.parse_resume")
@@ -368,3 +378,94 @@ def periodic_sync_all_task() -> dict[str, Any]:
         "skipped": skipped,
         "source_ids": dispatched_ids,
     }
+
+
+@celery_app.task(base=WorkflowTask, bind=True, name="agent_hub.worker.chat_parse_and_match")
+def parse_and_match_chat_task(
+    self,
+    session_id: str,
+    resume_text: str,
+    actor: str,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Chat 简历流水线：解析简历 → 建候选人 → opt-in → 绑定会话 → 匹配。
+
+    确定性地一次跑完，不依赖 LLM 决定是否调用工具。业务逻辑委托给
+    ``ChatService.run_analysis``，与同步 fallback 共用同一实现。
+    """
+    from agent_hub.agents.global_part_time.chat_service import ChatService
+
+    service, repo, _tracker = self._get_service_and_tracker()
+    chat = ChatService(service=service, repo=repo)
+    return chat.run_analysis(session_id, resume_text, actor, limit)
+
+
+# ---------------------------------------------------------------------------
+# Embedding tasks
+# ---------------------------------------------------------------------------
+
+EMBED_BATCH_SIZE = 64
+
+
+def _embed_jobs(repo: Any, job_ids: list[str]) -> dict[str, Any]:
+    """为给定职位批量生成向量并落库。仓储无向量能力时直接跳过。"""
+    if not hasattr(repo, "update_job_embeddings"):
+        return {"requested": len(job_ids), "embedded": 0, "skipped": "no_vector_support"}
+    from agent_hub.agents.global_part_time import embedding as embedding_mod
+
+    jobs = [job for job in (repo.get("job", job_id) for job_id in job_ids) if job]
+    embedded = 0
+    for start in range(0, len(jobs), EMBED_BATCH_SIZE):
+        batch = jobs[start : start + EMBED_BATCH_SIZE]
+        vectors = embedding_mod.get_embeddings([embedding_mod.build_job_text(job) for job in batch])
+        embeddings = {job["id"]: vec for job, vec in zip(batch, vectors) if vec is not None}
+        if not embeddings and batch and embedding_mod.SILICONFLOW_API_KEY:
+            # API key 已配置但整批失败 → 抛错交给错误分类器按可重试处理。
+            raise RuntimeError("embedding API returned no vectors for batch")
+        if embeddings:
+            embedded += repo.update_job_embeddings(embeddings)
+    return {"requested": len(job_ids), "embedded": embedded}
+
+
+@celery_app.task(base=WorkflowTask, bind=True, name="agent_hub.worker.embed_jobs")
+def embed_jobs_task(
+    self,
+    job_ids: list[str],
+    actor: str,
+    workflow_run_id: str | None = None,
+) -> dict[str, Any]:
+    _service, repo, _tracker = self._get_service_and_tracker()
+    return _run_task(
+        self,
+        workflow_type="embedding",
+        step_name="embed_jobs",
+        target_id=job_ids[0] if job_ids else "none",
+        actor=actor,
+        operation_fn=lambda: _embed_jobs(repo, job_ids),
+        workflow_run_id=workflow_run_id,
+        payload={"job_count": len(job_ids)},
+    )
+
+
+@celery_app.task(base=WorkflowTask, bind=True, name="agent_hub.worker.backfill_embeddings")
+def backfill_embeddings_task(
+    self,
+    actor: str = "system",
+    limit: int = 500,
+    workflow_run_id: str | None = None,
+) -> dict[str, Any]:
+    """补齐存量活跃职位缺失的向量。"""
+    _service, repo, _tracker = self._get_service_and_tracker()
+    if not hasattr(repo, "list_jobs_missing_embedding"):
+        return {"skipped": True, "reason": "no_vector_support"}
+    job_ids = repo.list_jobs_missing_embedding(limit)
+    return _run_task(
+        self,
+        workflow_type="embedding_backfill",
+        step_name="backfill_embeddings",
+        target_id="jobs",
+        actor=actor,
+        operation_fn=lambda: _embed_jobs(repo, job_ids),
+        workflow_run_id=workflow_run_id,
+        payload={"job_count": len(job_ids)},
+    )
