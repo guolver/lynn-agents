@@ -215,13 +215,9 @@ def _skill_score(
     return min(score, 1.0), direct, indirect
 
 
-def _legacy_score_match(
-    candidate: dict[str, Any],
-    job: dict[str, Any],
-    expand_fn: Callable[[list[str]], set[str]] | None = None,
-) -> tuple[float, dict[str, float], list[str]]:
-    """按照版本化权重生成可复现总分、分项分数和面向用户的理由。"""
-    skill, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
+def _non_skill_match(
+    candidate: dict[str, Any], job: dict[str, Any]
+) -> tuple[dict[str, float], list[str]]:
     required_langs = set(job.get("languages") or [])
     owned_langs = {
         x["code"] if isinstance(x, dict) else x for x in candidate.get("languages") or []
@@ -250,28 +246,50 @@ def _legacy_score_match(
     quality = float(job.get("quality_score", 0.5))
     freshness_quality = min(max(quality, 0.0), 1.0)
     breakdown = {
-        "skills": round(skill, 4),
         "language": round(language, 4),
         "location_timezone": round(location_timezone, 4),
         "compensation": round(compensation, 4),
         "preference": round(preference, 4),
         "freshness_quality": round(freshness_quality, 4),
     }
-    total = round(sum(breakdown[k] * SCORE_WEIGHTS[k] for k in SCORE_WEIGHTS), 4)
     reasons = []
-    if direct_skills:
-        reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
-    if indirect_skills:
-        reasons.append(f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关")
-    if not direct_skills and not indirect_skills and skill >= 0.5:
-        reasons.append("技能与职位要求高度匹配")
     if location_timezone >= 0.7:
         reasons.append("地区与工作时区满足要求")
     if compensation >= 1:
         reasons.append("薪资达到最低期望")
     if preference >= 1:
         reasons.append("职位类别符合你的偏好")
+    return breakdown, reasons
+
+
+def _score_from_skill(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    skill: float,
+    skill_reasons: list[str],
+) -> tuple[float, dict[str, float], list[str]]:
+    non_skill_breakdown, non_skill_reasons = _non_skill_match(candidate, job)
+    breakdown = {"skills": round(skill, 4), **non_skill_breakdown}
+    total = round(sum(breakdown[k] * SCORE_WEIGHTS[k] for k in SCORE_WEIGHTS), 4)
+    reasons = skill_reasons + non_skill_reasons
     return total, breakdown, reasons or ["该职位通过了你的全部硬性条件"]
+
+
+def _legacy_score_match(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    expand_fn: Callable[[list[str]], set[str]] | None = None,
+) -> tuple[float, dict[str, float], list[str]]:
+    """按照版本化权重生成可复现总分、分项分数和面向用户的理由。"""
+    skill, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
+    skill_reasons = []
+    if direct_skills:
+        skill_reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
+    if indirect_skills:
+        skill_reasons.append(f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关")
+    if not direct_skills and not indirect_skills and skill >= 0.5:
+        skill_reasons.append("技能与职位要求高度匹配")
+    return _score_from_skill(candidate, job, skill, skill_reasons)
 
 
 ExpandEvidenceFn = Callable[[list[str]], ExpansionResult]
@@ -335,12 +353,14 @@ def _graph_skill_score(
                 required_kind == "category"
                 and path.target_kind == "category"
                 and path.relations[-1] == "CHILD_OF"
+                and "REQUIRES" not in path.relations
             )
             # Candidate-side concrete matching must start with symmetric RELATED_TO.
             related_match = (
                 required_kind == "skill"
                 and path.target_kind == "skill"
                 and path.relations[0] == "RELATED_TO"
+                and "REQUIRES" not in path.relations
             )
             if category_match or related_match:
                 path_candidates.append((path, candidate_skill))
@@ -394,19 +414,7 @@ def score_match_with_evidence(
         return total, breakdown, reasons, {"requirements": []}
 
     skill, graph_reasons, graph = _graph_skill_score(candidate, job, expand_evidence_fn)
-    _, direct_breakdown, direct_reasons = _legacy_score_match(candidate, job)
-    breakdown = dict(direct_breakdown)
-    breakdown["skills"] = round(skill, 4)
-    total = round(sum(breakdown[key] * SCORE_WEIGHTS[key] for key in SCORE_WEIGHTS), 4)
-
-    non_skill_reasons = [
-        reason
-        for reason in direct_reasons
-        if not reason.startswith("技能") and "候选人技能" not in reason
-    ]
-    reasons = graph_reasons + non_skill_reasons
-    if not reasons:
-        reasons = ["该职位通过了你的全部硬性条件"]
+    total, breakdown, reasons = _score_from_skill(candidate, job, skill, graph_reasons)
     return total, breakdown, reasons, graph
 
 
