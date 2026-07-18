@@ -325,6 +325,8 @@ class WorkflowRun(Base):
     workflow_type: Mapped[str] = mapped_column(String(50), nullable=False)
     target_id: Mapped[str] = mapped_column(String(36), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    actor: Mapped[str] = mapped_column(String(255), nullable=False, default="system")
+    celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -333,7 +335,10 @@ class WorkflowRun(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
-    __table_args__ = (Index("ix_workflow_runs_status", "status"),)
+    __table_args__ = (
+        Index("ix_workflow_runs_status", "status"),
+        Index("ix_workflow_runs_celery_task_id", "celery_task_id"),
+    )
 
 
 class WorkflowStep(Base):
@@ -345,6 +350,9 @@ class WorkflowStep(Base):
     )
     step_name: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_class: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow

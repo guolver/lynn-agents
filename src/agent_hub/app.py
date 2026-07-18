@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from .agents.global_part_time import http_api
@@ -78,6 +78,28 @@ def create_app(
     if load_plugins:
         discover_agents(registry, allowed_plugins=allowed_plugins)
 
+    # --- Workflow tracker (PostgreSQL only) ---
+    workflow_tracker = None
+    if hasattr(repo, "_engine"):
+        try:
+            from .worker.workflow import WorkflowTracker
+
+            workflow_tracker = WorkflowTracker(repo._engine)
+            logger.info("WorkflowTracker initialized")
+        except Exception:
+            logger.warning("Failed to initialize WorkflowTracker", exc_info=True)
+
+    # --- Celery app (optional) ---
+    celery_instance = None
+    if os.getenv("CELERY_BROKER_URL"):
+        try:
+            from .worker.celery_app import celery_app as _celery_app
+
+            celery_instance = _celery_app
+            logger.info("Celery app attached")
+        except Exception:
+            logger.warning("Failed to initialize Celery app", exc_info=True)
+
     @asynccontextmanager
     async def lifespan(_application: FastAPI):
         try:
@@ -94,12 +116,96 @@ def create_app(
     application.state.agent_registry = registry
     application.state.part_time_repository = repo
     application.state.part_time_service = part_time_service
+    if workflow_tracker is not None:
+        application.state.workflow_tracker = workflow_tracker
+    if celery_instance is not None:
+        application.state.celery_app = celery_instance
     application.include_router(create_platform_router(registry))
     application.include_router(http_api.router)
 
     @application.get("/health", tags=["platform"])
     def health() -> dict[str, Any]:
         return {"status": "ok", "registered_agents": len(registry.manifests())}
+
+    # --- Workflow management routes ---
+
+    @application.get("/api/v1/workflows", tags=["workflows"])
+    def list_workflows(
+        status: str | None = Query(None),
+        workflow_type: str | None = Query(None),
+        limit: int = Query(50, ge=1, le=200),
+    ) -> list[dict[str, Any]]:
+        if workflow_tracker is None:
+            return []
+        return workflow_tracker.list_runs(status=status, workflow_type=workflow_type, limit=limit)
+
+    @application.get("/api/v1/workflows/{run_id}", tags=["workflows"])
+    def get_workflow(run_id: str) -> dict[str, Any]:
+        if workflow_tracker is None:
+            return JSONResponse(status_code=404, content={"detail": "workflow tracking disabled"})
+        result = workflow_tracker.get_run(run_id)
+        if result is None:
+            return JSONResponse(
+                status_code=404, content={"detail": f"workflow run {run_id} not found"}
+            )
+        return result
+
+    @application.post("/api/v1/workflows/{run_id}/retry", tags=["workflows"])
+    def retry_workflow(run_id: str, request: Request) -> dict[str, Any]:
+        if workflow_tracker is None:
+            return JSONResponse(status_code=503, content={"detail": "workflow tracking disabled"})
+        run = workflow_tracker.get_run(run_id)
+        if run is None:
+            return JSONResponse(
+                status_code=404, content={"detail": f"workflow run {run_id} not found"}
+            )
+        if run["status"] not in ("failed", "manual_review"):
+            return JSONResponse(
+                status_code=409, content={"detail": f"cannot retry run in status {run['status']}"}
+            )
+        if celery_instance is None:
+            return JSONResponse(status_code=503, content={"detail": "celery not configured"})
+        # Re-dispatch based on workflow type.
+        from .worker.tasks import (
+            notification_pipeline_task,
+            run_matches_task,
+            send_notification_task,
+            sync_source_task,
+        )
+
+        task_map = {
+            "source_sync": sync_source_task,
+            "matching": run_matches_task,
+            "notification": notification_pipeline_task,
+            "notification_send": send_notification_task,
+        }
+        task_fn = task_map.get(run["workflow_type"])
+        if task_fn is None:
+            return JSONResponse(
+                status_code=422,
+                content={"detail": f"unknown workflow type: {run['workflow_type']}"},
+            )
+
+        # Build kwargs from the original run payload.
+        payload = run.get("payload", {})
+        kwargs: dict[str, Any] = {"actor": run["actor"]}
+        wtype = run["workflow_type"]
+        if wtype == "source_sync":
+            kwargs["source_id"] = payload.get("source_id", run["target_id"])
+            kwargs["jobs"] = payload.get("jobs", [])
+        elif wtype == "matching":
+            kwargs["candidate_id"] = payload.get("candidate_id", run["target_id"])
+        elif wtype == "notification":
+            kwargs["candidate_id"] = payload.get("candidate_id", run["target_id"])
+            kwargs["match_ids"] = payload.get("match_ids", [])
+            kwargs["base_url"] = payload.get("base_url", "")
+        elif wtype == "notification_send":
+            kwargs["notification_id"] = payload.get("notification_id", run["target_id"])
+
+        async_result = task_fn.delay(**kwargs)
+        return {"status": "retried", "new_celery_task_id": async_result.id}
+
+    # --- Exception handlers ---
 
     @application.exception_handler(AgentNotFoundError)
     @application.exception_handler(ActionNotFoundError)

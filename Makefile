@@ -1,4 +1,4 @@
-.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg format clean infra infra-up infra-down migrate
+.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg test-worker worker format clean infra infra-up infra-down migrate
 
 # — 初始化 ————————————————————————————————————
 
@@ -40,6 +40,14 @@ test-py: ## Python 单元测试（不需要 PostgreSQL）
 test-pg: ## PostgreSQL 集成测试（需要运行 make infra-up && make migrate）
 	. .venv/bin/activate && TEST_DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@127.0.0.1:5432/agent_hub_test \
 		python -m unittest tests.test_postgres_repository tests.test_postgres_concurrency tests.test_postgres_workflow -v
+
+test-worker: ## Celery 集成测试（需要 Redis + PostgreSQL）
+	. .venv/bin/activate && TEST_DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@127.0.0.1:5432/agent_hub_test \
+		python -m unittest tests.test_celery_tasks tests.test_workflow_tracker tests.test_error_classification -v
+
+worker: ## 启动 Celery worker
+	. .venv/bin/activate && celery -A agent_hub.worker.celery_app:celery_app worker \
+		--loglevel=info --concurrency=2
 
 # — 基础设施 ————————————————————————————————————
 
