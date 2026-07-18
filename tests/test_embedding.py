@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from agent_hub.agents.global_part_time import embedding
+from agent_hub.agents.global_part_time.embedding import build_candidate_text
 
 
 class _FakeItem:
@@ -74,6 +75,32 @@ class GetEmbeddingsTest(unittest.TestCase):
         ):
             result = embedding.get_embeddings(["hello", "world"])
         self.assertEqual(result, [None, None])
+
+
+class BuildCandidateTextTests(unittest.TestCase):
+    def test_includes_resume_summary(self):
+        text = build_candidate_text(
+            {
+                "skills": [{"name": "python"}],
+                "desired_roles": ["backend"],
+                "resume_summary": "五年后端开发经验，主导支付系统重构",
+            }
+        )
+        self.assertIn("Skills: python", text)
+        self.assertIn("Desired roles: backend", text)
+        self.assertIn("Experience: 五年后端开发经验，主导支付系统重构", text)
+
+    def test_without_resume_summary_unchanged(self):
+        text = build_candidate_text({"skills": ["python"]})
+        self.assertEqual(text, "Skills: python")
+
+    def test_resume_summary_truncated_to_1500(self):
+        text = build_candidate_text({"resume_summary": "x" * 2000})
+        self.assertEqual(text, "Experience: " + "x" * 1500)
+
+    def test_blank_resume_summary_ignored(self):
+        text = build_candidate_text({"skills": ["python"], "resume_summary": "   "})
+        self.assertEqual(text, "Skills: python")
 
 
 if __name__ == "__main__":

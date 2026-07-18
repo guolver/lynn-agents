@@ -73,7 +73,7 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 def build_candidate_text(candidate: dict[str, Any]) -> str:
-    """将候选人的技能和期望角色组合为一段用于 embedding 的文本。"""
+    """将候选人的技能、期望角色与简历概要组合为一段用于 embedding 的文本。"""
     parts: list[str] = []
     skills = candidate.get("skills") or []
     skill_names = [s["name"] if isinstance(s, dict) else s for s in skills]
@@ -82,6 +82,9 @@ def build_candidate_text(candidate: dict[str, Any]) -> str:
     desired_roles = candidate.get("desired_roles") or []
     if desired_roles:
         parts.append("Desired roles: " + ", ".join(desired_roles))
+    resume_summary = (candidate.get("resume_summary") or "").strip()
+    if resume_summary:
+        parts.append("Experience: " + resume_summary[:1500])
     return ". ".join(parts)
 
 
