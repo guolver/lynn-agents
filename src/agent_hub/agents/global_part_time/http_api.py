@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from .repository import RepositoryProtocol
@@ -189,6 +191,10 @@ def once(repository: RepositoryProtocol, action: str, key: str, operation: Any) 
     return repository.idempotent(action, key, operation)
 
 
+def _celery_available(request: Request) -> bool:
+    return hasattr(request.app.state, "celery_app") and request.app.state.celery_app is not None
+
+
 @router.post("/sources", status_code=201)
 def create_source(
     body: SourceCreate,
@@ -228,16 +234,44 @@ def sync_source(
     body: SyncRequest,
     key: IdempotencyKey,
     actor: Actor,
+    request: Request,
     repository: RepositoryDep,
     service: ServiceDep,
 ) -> dict[str, Any]:
     jobs = [dump(job) for job in body.jobs]
+    if _celery_available(request):
+        from agent_hub.worker.tasks import sync_source_task
+
+        result = sync_source_task.delay(source_id, jobs, actor)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "accepted",
+                "celery_task_id": result.id,
+                "detail": "task dispatched to worker",
+            },
+        )
     return once(
         repository,
         f"source.sync:{source_id}",
         key,
         lambda: service.sync_source(source_id, jobs, actor),
     )
+
+
+@router.get("/candidates")
+def list_candidates(repository: RepositoryDep) -> list[dict[str, Any]]:
+    return repository.list("candidate")
+
+
+@router.get("/notifications")
+def list_notifications(
+    repository: RepositoryDep, status: str | None = None
+) -> list[dict[str, Any]]:
+    notifications = repository.list("notification")
+    if status:
+        return [n for n in notifications if n.get("status") == status]
+    return notifications
 
 
 @router.get("/jobs")
@@ -366,9 +400,23 @@ def run_matches(
     body: MatchRunRequest,
     key: IdempotencyKey,
     actor: Actor,
+    request: Request,
     repository: RepositoryDep,
     service: ServiceDep,
+    sync: bool = False,
 ) -> dict[str, Any]:
+    if not sync and _celery_available(request):
+        from agent_hub.worker.tasks import run_matches_task
+
+        result = run_matches_task.delay(body.candidate_id, actor, body.limit)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "accepted",
+                "celery_task_id": result.id,
+                "detail": "task dispatched to worker",
+            },
+        )
     return once(
         repository,
         f"matches.run:{body.candidate_id}",
@@ -404,10 +452,25 @@ def preview_digest(
     body: DigestPreviewRequest,
     key: IdempotencyKey,
     actor: Actor,
+    request: Request,
     repository: RepositoryDep,
     service: ServiceDep,
 ) -> dict[str, Any]:
     base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+    if _celery_available(request):
+        from agent_hub.worker.tasks import notification_pipeline_task
+
+        result = notification_pipeline_task.delay(
+            body.candidate_id, body.match_ids, actor, base_url
+        )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "accepted",
+                "celery_task_id": result.id,
+                "detail": "task dispatched to worker",
+            },
+        )
     return once(
         repository,
         f"notification.preview:{body.candidate_id}",
@@ -438,9 +501,22 @@ def send_notification(
     body: NotificationSendRequest,
     key: IdempotencyKey,
     actor: Actor,
+    request: Request,
     repository: RepositoryDep,
     service: ServiceDep,
 ) -> dict[str, Any]:
+    if _celery_available(request):
+        from agent_hub.worker.tasks import send_notification_task
+
+        result = send_notification_task.delay(body.notification_id, actor)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "accepted",
+                "celery_task_id": result.id,
+                "detail": "task dispatched to worker",
+            },
+        )
     return once(
         repository,
         f"notification.send:{body.notification_id}",
@@ -465,8 +541,201 @@ def unsubscribe(
     )
 
 
+@router.post("/candidates/upload-resume", status_code=201)
+def upload_resume(
+    file: UploadFile,
+    actor: Actor,
+    request: Request,
+    service: ServiceDep,
+) -> dict[str, Any]:
+    _logger = logging.getLogger(__name__)
+
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        return JSONResponse(status_code=422, content={"detail": "仅支持 PDF 文件"})
+
+    pdf_bytes = file.file.read()
+    if not pdf_bytes:
+        return JSONResponse(status_code=422, content={"detail": "文件为空"})
+
+    # Celery 可用时异步执行
+    if _celery_available(request):
+        from agent_hub.worker.tasks import parse_resume_task
+
+        result = parse_resume_task.delay(pdf_bytes.hex(), actor)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "accepted",
+                "celery_task_id": result.id,
+                "detail": "简历解析任务已提交，正在后台处理",
+            },
+        )
+
+    # 同步执行（无 Celery 时的 fallback）
+    try:
+        from .resume_parser import extract_text_from_pdf, parse_resume
+    except ImportError as exc:
+        _logger.exception("resume_parser dependencies not installed")
+        return JSONResponse(
+            status_code=501,
+            content={"detail": f"简历解析依赖未安装: {exc}"},
+        )
+
+    try:
+        text = extract_text_from_pdf(pdf_bytes)
+    except Exception as exc:
+        _logger.exception("PDF text extraction failed")
+        return JSONResponse(
+            status_code=422,
+            content={"detail": f"PDF 解析失败: {exc}"},
+        )
+
+    if not text.strip():
+        return JSONResponse(status_code=422, content={"detail": "无法从 PDF 中提取文本"})
+
+    try:
+        parsed = parse_resume(text)
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+    except Exception as exc:
+        _logger.exception("LLM resume parsing failed")
+        return JSONResponse(
+            status_code=502,
+            content={"detail": f"简历解析服务异常: {exc}"},
+        )
+
+    _logger.info(
+        "Resume parsed: country=%s, skills=%d",
+        parsed.get("country"),
+        len(parsed.get("skills", [])),
+    )
+
+    candidate = service.create_candidate(parsed, actor)
+    candidate_id = candidate["id"]
+
+    service.set_consent(candidate_id, True, actor, "resume_upload")
+
+    match_result = service.run_matches(candidate_id, actor)
+    matches_count = len(match_result.get("matches", []))
+
+    return {
+        "candidate": candidate,
+        "matches_count": matches_count,
+        "parsed_fields": parsed,
+    }
+
+
+@router.get("/tasks/{task_id}/status")
+def get_task_status(task_id: str, request: Request) -> dict[str, Any]:
+    """查询 Celery 异步任务的状态和结果。"""
+    if not _celery_available(request):
+        return JSONResponse(status_code=501, content={"detail": "异步任务不可用"})
+
+    celery_app = request.app.state.celery_app
+    result = celery_app.AsyncResult(task_id)
+
+    response: dict[str, Any] = {
+        "task_id": task_id,
+        "status": result.status,
+    }
+
+    if result.ready():
+        if result.successful():
+            response["result"] = result.result
+        else:
+            response["error"] = str(result.result)
+
+    return response
+
+
 @router.get("/audit")
 def audit_log(
     repository: RepositoryDep, limit: int = Query(default=100, ge=1, le=1000)
 ) -> list[dict[str, Any]]:
     return repository.audits(limit)
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoints
+# ---------------------------------------------------------------------------
+
+
+class ChatMessageRequest(APIModel):
+    content: str = Field(min_length=1, max_length=5000)
+
+
+@router.post("/chat/sessions", status_code=201)
+def create_chat_session(request: Request, actor: Actor) -> dict[str, Any]:
+    chat_svc = request.app.state.chat_service
+    return chat_svc.create_session(actor=actor)
+
+
+@router.get("/chat/sessions")
+def list_chat_sessions(request: Request) -> list[dict[str, Any]]:
+    chat_svc = request.app.state.chat_service
+    return chat_svc.list_sessions()
+
+
+@router.get("/chat/sessions/{session_id}")
+def get_chat_session(session_id: str, request: Request) -> dict[str, Any]:
+    chat_svc = request.app.state.chat_service
+    result = chat_svc.get_session(session_id)
+    if result is None:
+        return JSONResponse(status_code=404, content={"detail": "Session not found"})
+    return result
+
+
+@router.post("/chat/sessions/{session_id}/messages")
+def send_chat_message(
+    session_id: str,
+    body: ChatMessageRequest,
+    request: Request,
+):
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    chat_svc = request.app.state.chat_service
+
+    def event_stream():
+        for event in chat_svc.stream_response(session_id, body.content):
+            event_type = event["event"]
+            event_data = _json.dumps(event["data"], ensure_ascii=False, default=str)
+            yield f"event: {event_type}\ndata: {event_data}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/chat/sessions/{session_id}/upload", status_code=201)
+def upload_chat_resume(
+    session_id: str,
+    file: UploadFile,
+    request: Request,
+    actor: Actor,
+):
+    chat_svc = request.app.state.chat_service
+
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        return JSONResponse(status_code=422, content={"detail": "仅支持 PDF 文件"})
+
+    pdf_bytes = file.file.read()
+    if not pdf_bytes:
+        return JSONResponse(status_code=422, content={"detail": "文件为空"})
+
+    try:
+        from .resume_parser import extract_text_from_pdf
+    except ImportError as exc:
+        return JSONResponse(status_code=501, content={"detail": f"简历解析依赖未安装: {exc}"})
+
+    try:
+        text = extract_text_from_pdf(pdf_bytes)
+    except Exception as exc:
+        return JSONResponse(status_code=422, content={"detail": f"PDF 解析失败: {exc}"})
+
+    if not text.strip():
+        return JSONResponse(status_code=422, content={"detail": "无法从 PDF 中提取文本"})
+
+    # Store extracted text as user message for LLM context
+    chat_svc.add_message(session_id, "user", f"[简历内容]\n{text}")
+
+    return {"session_id": session_id, "resume_text_length": len(text), "status": "uploaded"}

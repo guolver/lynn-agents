@@ -75,7 +75,23 @@ def create_app(
         except Exception:
             logger.warning("Failed to initialize skill graph, continuing without it", exc_info=True)
             close_neo4j_driver()
-    part_time_service = AgentService(repo, expand_fn=expand_fn)
+    embed_fn = None
+    if os.getenv("EMBEDDING_ENABLED", "true").lower() == "true":
+        try:
+            from .agents.global_part_time.embedding import get_embedding
+
+            embed_fn = get_embedding
+        except Exception:
+            logger.warning(
+                "Failed to import embedding module, continuing without it", exc_info=True
+            )
+
+    part_time_service = AgentService(repo, expand_fn=expand_fn, embed_fn=embed_fn)
+
+    from .agents.global_part_time.chat_service import ChatService
+
+    chat_service = ChatService(service=part_time_service, repo=repo)
+
     registry = AgentRegistry()
     registry.register(GlobalPartTimeAgent(part_time_service, repo))
     for agent in extra_agents:
@@ -125,6 +141,7 @@ def create_app(
         application.state.workflow_tracker = workflow_tracker
     if celery_instance is not None:
         application.state.celery_app = celery_instance
+    application.state.chat_service = chat_service
     application.include_router(create_platform_router(registry))
     application.include_router(http_api.router)
     if skill_graph_router is not None:
