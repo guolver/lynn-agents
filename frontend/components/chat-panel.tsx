@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChatMessage } from './chat-message';
 import { JobDetailDrawer } from './job-detail-drawer';
 
-import { EMPTY_STATE_SUGGESTIONS, QUICK_ACTIONS } from '../lib/chat-suggestions';
+import { EMPTY_STATE_SUGGESTIONS, FOLLOW_UPS, QUICK_ACTIONS } from '../lib/chat-suggestions';
 
 type FileData = {
   name: string;
@@ -84,6 +84,7 @@ export function ChatPanel({
   const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [lastToolName, setLastToolName] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -141,6 +142,7 @@ export function ChatPanel({
 
   async function streamAssistant(text: string) {
     setIsStreaming(true);
+    setLastToolName(null);
     const assistantId = crypto.randomUUID();
     setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
 
@@ -166,6 +168,7 @@ export function ChatPanel({
               prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + data.content } : m)),
             );
           } else if (eventType === 'tool_call') {
+            setLastToolName(data.name);
             const label = TOOL_LABELS[data.name] || 'Processing...';
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, content: m.content || label } : m)),
@@ -221,6 +224,7 @@ export function ChatPanel({
 
   // Render a completed analysis (summary text + match cards) into the placeholder.
   function applyAnalysisResult(assistantId: string, result: AnalysisResult | undefined) {
+    setLastToolName('run_matches');
     const matches = result?.matches;
     setMessages((prev) =>
       prev.map((m) =>
@@ -332,6 +336,12 @@ export function ChatPanel({
     }
   }
 
+  const lastMsg = messages[messages.length - 1];
+  const followUps =
+    !isStreaming && !isUploading && lastMsg?.role === 'assistant' && (lastMsg.content || lastMsg.toolData)
+      ? (FOLLOW_UPS[lastToolName ?? 'default'] ?? FOLLOW_UPS.default)
+      : [];
+
   return (
     <div className="chat-panel">
       {/* Messages */}
@@ -372,6 +382,15 @@ export function ChatPanel({
               }
             />
           ))}
+          {followUps.length > 0 && (
+            <div className="chat-followups">
+              {followUps.map((f) => (
+                <button key={f} className="chat-followup-pill" onClick={() => sendPrompt(f)}>
+                  {f}
+                </button>
+              ))}
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </div>

@@ -760,6 +760,30 @@ a {
   cursor: not-allowed;
 }
 
+/* Follow-up suggestion pills */
+.chat-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 8px 44px;
+}
+
+.chat-followup-pill {
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-warm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.chat-followup-pill:hover {
+  background: var(--bg-alt);
+  border-color: var(--line-strong);
+}
+
 /* Input area */
 .chat-input-wrap {
   padding: 0 16px 16px;
