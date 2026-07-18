@@ -183,7 +183,10 @@ def sync_source_task(
     )
     job_ids = result.get("job_ids") or []
     if job_ids and hasattr(_repo, "update_job_embeddings"):
-        embed_jobs_task.delay(job_ids, actor)
+        try:
+            embed_jobs_task.delay(job_ids, actor)
+        except Exception:
+            logger.warning("Failed to enqueue embed_jobs task", exc_info=True)
     return result
 
 
@@ -301,7 +304,10 @@ def fetch_and_sync_source_task(
     )
     job_ids = result.get("job_ids") or []
     if job_ids and hasattr(repo, "update_job_embeddings"):
-        embed_jobs_task.delay(job_ids, actor)
+        try:
+            embed_jobs_task.delay(job_ids, actor)
+        except Exception:
+            logger.warning("Failed to enqueue embed_jobs task", exc_info=True)
     return result
 
 
@@ -417,10 +423,11 @@ def _embed_jobs(repo: Any, job_ids: list[str]) -> dict[str, Any]:
     embedded = 0
     for start in range(0, len(jobs), EMBED_BATCH_SIZE):
         batch = jobs[start : start + EMBED_BATCH_SIZE]
-        vectors = embedding_mod.get_embeddings([embedding_mod.build_job_text(job) for job in batch])
+        texts = [embedding_mod.build_job_text(job) for job in batch]
+        vectors = embedding_mod.get_embeddings(texts)
         embeddings = {job["id"]: vec for job, vec in zip(batch, vectors) if vec is not None}
-        if not embeddings and batch and embedding_mod.SILICONFLOW_API_KEY:
-            # API key 已配置但整批失败 → 抛错交给错误分类器按可重试处理。
+        if not embeddings and embedding_mod.SILICONFLOW_API_KEY and any(t.strip() for t in texts):
+            # API key 已配置且有可嵌入文本却整批失败 → 抛错按可重试处理。
             raise RuntimeError("embedding API returned no vectors for batch")
         if embeddings:
             embedded += repo.update_job_embeddings(embeddings)

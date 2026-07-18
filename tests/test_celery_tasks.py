@@ -10,6 +10,7 @@ from unittest.mock import patch
 from agent_hub.agents.global_part_time.repository import SQLiteRepository
 from agent_hub.agents.global_part_time.service import AgentService
 from agent_hub.worker.celery_app import celery_app
+from agent_hub.worker.errors import classify
 from agent_hub.worker.tasks import (
     WorkflowTask,
     _embed_jobs,
@@ -336,6 +337,59 @@ class EmbedJobsTest(unittest.TestCase):
         ):
             with self.assertRaises(RuntimeError):
                 _embed_jobs(FakeVectorRepo(), ["j1"])
+
+    def test_multiple_batches_split_by_batch_size(self):
+        class FakeVectorRepo:
+            def __init__(self):
+                self.jobs = {
+                    f"j{i}": {"id": f"j{i}", "title_original": f"Job {i}"} for i in range(70)
+                }
+                self.stored = {}
+
+            def get(self, kind, job_id):
+                return self.jobs.get(job_id)
+
+            def update_job_embeddings(self, embeddings):
+                self.stored.update(embeddings)
+                return len(embeddings)
+
+        repo = FakeVectorRepo()
+        call_lengths = []
+
+        def _fake_get_embeddings(texts):
+            call_lengths.append(len(texts))
+            return [[0.1, 0.2]] * len(texts)
+
+        with patch(
+            "agent_hub.agents.global_part_time.embedding.get_embeddings",
+            side_effect=_fake_get_embeddings,
+        ):
+            result = _embed_jobs(repo, list(repo.jobs))
+        self.assertEqual(len(call_lengths), 2)
+        self.assertEqual(call_lengths, [64, 6])
+        self.assertEqual(result["embedded"], 70)
+
+    def test_empty_text_batch_does_not_raise(self):
+        class FakeVectorRepo:
+            def get(self, kind, job_id):
+                return {"id": job_id, "title_original": ""}
+
+            def update_job_embeddings(self, embeddings):
+                return len(embeddings)
+
+        with (
+            patch(
+                "agent_hub.agents.global_part_time.embedding.get_embeddings",
+                side_effect=lambda texts: [None] * len(texts),
+            ),
+            patch("agent_hub.agents.global_part_time.embedding.SILICONFLOW_API_KEY", "sk-test"),
+        ):
+            result = _embed_jobs(FakeVectorRepo(), ["j1"])
+        self.assertEqual(result["embedded"], 0)
+
+    def test_retryable_error_classification(self):
+        classified = classify(RuntimeError("embedding API returned no vectors for batch"))
+        self.assertEqual(classified.category, "retryable")
 
 
 if __name__ == "__main__":
