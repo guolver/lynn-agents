@@ -295,6 +295,49 @@ def fetch_and_sync_source_task(
     )
 
 
+@celery_app.task(base=WorkflowTask, bind=True, name="agent_hub.worker.parse_resume")
+def parse_resume_task(
+    self,
+    pdf_bytes_hex: str,
+    actor: str,
+    workflow_run_id: str | None = None,
+) -> dict[str, Any]:
+    """解析简历 PDF → 创建候选人 → 自动 opt-in → 触发匹配。"""
+    from agent_hub.agents.global_part_time.resume_parser import extract_text_from_pdf, parse_resume
+
+    service, _repo, _tracker = self._get_service_and_tracker()
+
+    def _parse_and_create():
+        pdf_bytes = bytes.fromhex(pdf_bytes_hex)
+        text = extract_text_from_pdf(pdf_bytes)
+        if not text.strip():
+            raise ValueError("无法从 PDF 中提取文本")
+
+        parsed = parse_resume(text)
+        candidate = service.create_candidate(parsed, actor)
+        candidate_id = candidate["id"]
+        service.set_consent(candidate_id, True, actor, "resume_upload")
+        match_result = service.run_matches(candidate_id, actor)
+        matches_count = len(match_result.get("matches", []))
+
+        return {
+            "candidate": candidate,
+            "matches_count": matches_count,
+            "parsed_fields": parsed,
+        }
+
+    return _run_task(
+        self,
+        workflow_type="resume_parsing",
+        step_name="parse_resume",
+        target_id="resume",
+        actor=actor,
+        operation_fn=_parse_and_create,
+        workflow_run_id=workflow_run_id,
+        payload={"actor": actor},
+    )
+
+
 @celery_app.task(name="agent_hub.worker.periodic_sync_all")
 def periodic_sync_all_task() -> dict[str, Any]:
     """Coordinator: dispatch fetch_and_sync_source_task for every eligible source."""
