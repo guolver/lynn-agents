@@ -74,6 +74,8 @@ class RepositoryProtocol(Protocol):
         self, action: str, key: str, operation: Callable[[], dict[str, Any]]
     ) -> dict[str, Any]: ...
 
+    def list_by_session(self, session_id: str) -> list[dict[str, Any]]: ...
+
 
 class SQLiteRepository:
     """以 JSON 实体保存 MVP 数据，并单独维护审计和幂等记录。"""
@@ -129,6 +131,15 @@ class SQLiteRepository:
                 "SELECT payload FROM entities WHERE kind=? ORDER BY created_at DESC", (kind,)
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
+
+    def list_by_session(self, session_id: str) -> list[dict[str, Any]]:
+        """Return all chat messages for a session, ordered by creation time ascending."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM entities WHERE kind='chat_message' ORDER BY created_at ASC",
+            ).fetchall()
+        all_msgs = [json.loads(row[0]) for row in rows]
+        return [m for m in all_msgs if m.get("session_id") == session_id]
 
     def delete(self, kind: str, entity_id: str) -> None:
         with self.connection() as conn:
