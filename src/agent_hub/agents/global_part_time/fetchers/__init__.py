@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import ssl
+from collections.abc import Callable
 from html.parser import HTMLParser
 
 try:
@@ -38,3 +39,18 @@ def strip_html(html: str) -> str:
     stripper.feed(html)
     text = stripper.get_text()
     return re.sub(r"\s+", " ", text).strip()
+
+
+def get_fetcher(base_url: str) -> tuple[Callable, Callable] | None:
+    """Return ``(fetch_fn, map_job_fn)`` for *base_url*, or ``None`` if unrecognised."""
+    from .remoteok import fetch as remoteok_fetch, map_job as remoteok_map
+    from .remotive import fetch as remotive_fetch, map_job as remotive_map
+
+    _REGISTRY: dict[str, tuple[Callable, Callable]] = {
+        "remoteok.com": (remoteok_fetch, remoteok_map),
+        "remotive.com": (remotive_fetch, remotive_map),
+    }
+    for domain, funcs in _REGISTRY.items():
+        if domain in base_url:
+            return funcs
+    return None

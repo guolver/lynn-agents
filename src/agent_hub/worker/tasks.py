@@ -248,3 +248,80 @@ def send_notification_task(
         workflow_run_id=workflow_run_id,
         payload={"notification_id": notification_id},
     )
+
+
+@celery_app.task(base=WorkflowTask, bind=True, name="agent_hub.worker.fetch_and_sync_source")
+def fetch_and_sync_source_task(
+    self,
+    source_id: str,
+    actor: str,
+    workflow_run_id: str | None = None,
+) -> dict[str, Any]:
+    """Fetch jobs from a single source, map them, and sync into the database."""
+    from agent_hub.agents.global_part_time.fetchers import get_fetcher
+
+    service, repo, _tracker = self._get_service_and_tracker()
+
+    source = repo.get("source", source_id)
+    if not source:
+        logger.info("Source %s not found, skipping", source_id)
+        return {"skipped": True, "reason": "source_not_found"}
+    if source.get("review_status") != "approved" or not source.get("enabled"):
+        logger.info("Source %s not approved/enabled, skipping", source_id)
+        return {"skipped": True, "reason": "not_approved_or_enabled"}
+
+    base_url = source.get("base_url", "")
+    fetcher = get_fetcher(base_url)
+    if fetcher is None:
+        logger.info("No fetcher for source %s (base_url=%s), skipping", source_id, base_url)
+        return {"skipped": True, "reason": "no_fetcher"}
+
+    fetch_fn, map_fn = fetcher
+
+    def _fetch_and_sync():
+        raw_jobs = fetch_fn()
+        mapped = [map_fn(raw) for raw in raw_jobs]
+        return service.sync_source(source_id, mapped, actor)
+
+    return _run_task(
+        self,
+        workflow_type="source_fetch_sync",
+        step_name="fetch_and_sync_source",
+        target_id=source_id,
+        actor=actor,
+        operation_fn=_fetch_and_sync,
+        workflow_run_id=workflow_run_id,
+        payload={"source_id": source_id, "base_url": base_url},
+    )
+
+
+@celery_app.task(name="agent_hub.worker.periodic_sync_all")
+def periodic_sync_all_task() -> dict[str, Any]:
+    """Coordinator: dispatch fetch_and_sync_source_task for every eligible source."""
+    from agent_hub.agents.global_part_time.fetchers import get_fetcher
+    from agent_hub.database.config import create_repository
+
+    database_url = os.environ.get("DATABASE_URL")
+    repo = create_repository(database_url=database_url)
+
+    sources = repo.list("source")
+    dispatched_ids = []
+    skipped = 0
+
+    for source in sources:
+        if source.get("review_status") != "approved" or not source.get("enabled"):
+            skipped += 1
+            continue
+        base_url = source.get("base_url", "")
+        if get_fetcher(base_url) is None:
+            skipped += 1
+            continue
+        fetch_and_sync_source_task.delay(source["id"], "beat:periodic_sync")
+        dispatched_ids.append(source["id"])
+
+    logger.info("periodic_sync_all: dispatched=%d skipped=%d", len(dispatched_ids), skipped)
+    return {
+        "dispatched": len(dispatched_ids),
+        "skipped": skipped,
+        "source_ids": dispatched_ids,
+    }
