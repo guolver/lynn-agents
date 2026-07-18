@@ -21,6 +21,13 @@ class PostgresConcurrencyTest(unittest.TestCase):
 
         self.repo1 = PostgresRepository(TEST_DATABASE_URL)
         self.repo2 = PostgresRepository(TEST_DATABASE_URL)
+
+        from sqlalchemy import text
+
+        with self.repo1._engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+
         Base.metadata.drop_all(self.repo1._engine)
         Base.metadata.create_all(self.repo1._engine)
 

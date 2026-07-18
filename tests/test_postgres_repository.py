@@ -21,6 +21,13 @@ class PostgresRepositoryContractTest(unittest.TestCase):
         from agent_hub.database.repository import PostgresRepository
 
         repo = PostgresRepository(TEST_DATABASE_URL)
+
+        from sqlalchemy import text
+
+        with repo._engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+
         Base.metadata.drop_all(repo._engine)
         Base.metadata.create_all(repo._engine)
         return repo

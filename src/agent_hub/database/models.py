@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -117,6 +118,7 @@ class Job(Base):
     review_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")
     risk_level: Mapped[str] = mapped_column(String(10), nullable=False, default="low")
     risk_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow

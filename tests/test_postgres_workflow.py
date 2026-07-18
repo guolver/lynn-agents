@@ -22,6 +22,13 @@ class PostgresWorkflowTest(unittest.TestCase):
         from agent_hub.agents.global_part_time.service import AgentService
 
         self.repo = PostgresRepository(TEST_DATABASE_URL)
+
+        from sqlalchemy import text
+
+        with self.repo._engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+
         Base.metadata.drop_all(self.repo._engine)
         Base.metadata.create_all(self.repo._engine)
         self.service = AgentService(self.repo)
