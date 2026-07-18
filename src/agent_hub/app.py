@@ -45,6 +45,7 @@ def create_app(
 
     repo = repository or create_repository()
     expand_fn = None
+    expand_evidence_fn = None
     neo4j_driver = None
 
     def close_neo4j_driver() -> None:
@@ -66,11 +67,16 @@ def create_app(
             skill_graph = SkillGraphService(neo4j_driver)
             skill_graph.seed()
             expand_fn = skill_graph.expand
+            expand_evidence_fn = skill_graph.expand_with_evidence
             logger.info("Skill graph initialized from Neo4j at %s", neo4j_uri)
         except Exception:
             logger.warning("Failed to initialize skill graph, continuing without it", exc_info=True)
             close_neo4j_driver()
-    part_time_service = AgentService(repo, expand_fn=expand_fn)
+    part_time_service = AgentService(
+        repo,
+        expand_fn=expand_fn,
+        expand_evidence_fn=expand_evidence_fn,
+    )
     registry = AgentRegistry()
     registry.register(GlobalPartTimeAgent(part_time_service, repo))
     for agent in extra_agents:

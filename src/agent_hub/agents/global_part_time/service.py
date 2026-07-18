@@ -17,9 +17,10 @@ from .domain import (
     canonicalize_url,
     dedup_key,
     hard_filter,
-    score_match,
+    score_match_with_evidence,
     utcnow,
 )
+from ...skill_graph.types import ExpansionResult
 
 
 logger = logging.getLogger(__name__)
@@ -40,9 +41,11 @@ class AgentService:
         self,
         repository: RepositoryProtocol,
         expand_fn: Callable[[list[str]], set[str]] | None = None,
+        expand_evidence_fn: Callable[[list[str]], ExpansionResult] | None = None,
     ):
         self.repo = repository
         self.expand_fn = expand_fn
+        self.expand_evidence_fn = expand_evidence_fn
 
     @staticmethod
     def _id() -> str:
@@ -218,24 +221,6 @@ class AgentService:
     def run_matches(self, candidate_id: str, actor: str, limit: int = 50) -> dict[str, Any]:
         """先运行硬过滤，再为剩余职位生成版本化、可解释的匹配结果。"""
         candidate = self._required("candidate", candidate_id)
-        expansion_failed = False
-
-        def expand_skills(names: list[str]) -> set[str]:
-            nonlocal expansion_failed
-            if self.expand_fn is None or expansion_failed:
-                return set()
-            try:
-                return self.expand_fn(names)
-            except Exception as exc:
-                expansion_failed = True
-                logger.warning(
-                    "Skill graph expansion failed; using direct skill matching: %s",
-                    exc,
-                    exc_info=True,
-                )
-                return set()
-
-        expand_fn = expand_skills if self.expand_fn is not None else None
         existing_matches = {
             item["job_id"]: item
             for item in self.repo.list("match")
@@ -257,16 +242,38 @@ class AgentService:
                 continue
             eligible_jobs.append(job)
 
-        scored_jobs = []
-        for job in eligible_jobs:
-            scored_jobs.append((job, *score_match(candidate, job, expand_fn)))
-            if expansion_failed:
-                break
-        if expansion_failed:
-            scored_jobs = [(job, *score_match(candidate, job)) for job in eligible_jobs]
+        mode = "graph" if self.expand_evidence_fn else "direct"
+        callback_error: Exception | None = None
+
+        def expand_evidence(names: list[str]) -> ExpansionResult:
+            nonlocal callback_error
+            assert self.expand_evidence_fn is not None
+            try:
+                return self.expand_evidence_fn(names)
+            except Exception as exc:
+                callback_error = exc
+                raise
+
+        rich_callback = expand_evidence if self.expand_evidence_fn is not None else None
+        try:
+            scored = [
+                score_match_with_evidence(candidate, job, rich_callback) for job in eligible_jobs
+            ]
+        except Exception:
+            if callback_error is None:
+                raise
+            logger.warning(
+                "Skill graph expansion failed; recomputing direct batch: %s",
+                type(callback_error).__name__,
+                exc_info=True,
+            )
+            mode = "direct_fallback"
+            scored = [score_match_with_evidence(candidate, job) for job in eligible_jobs]
 
         results = []
-        for job, score, breakdown, reasons in scored_jobs:
+        for job, (score, breakdown, reasons, evidence) in zip(eligible_jobs, scored):
+            evidence["mode"] = mode
+            evidence["max_depth"] = 2 if mode == "graph" else 0
             match = {
                 "id": existing_matches.get(job["id"], {}).get("id", self._id()),
                 "candidate_id": candidate_id,
@@ -275,6 +282,7 @@ class AgentService:
                 "score": score,
                 "score_breakdown": breakdown,
                 "reasons": reasons,
+                "skill_graph_evidence": evidence,
                 "rule_version": RULE_VERSION,
                 "job_version": job["updated_at"],
                 "created_at": utcnow(),
