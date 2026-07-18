@@ -20,9 +20,12 @@ from .domain import (
     score_match,
     utcnow,
 )
+from .embedding import build_candidate_text
 
 
 logger = logging.getLogger(__name__)
+
+RECALL_LIMIT = 200
 
 
 class NotFoundError(ValueError):
@@ -268,9 +271,33 @@ class AgentService:
             and notification.get("status") == "sent"
             for job_id in notification.get("job_ids", [])
         }
+        # 召回阶段：优先 pgvector 向量检索；不可用或失败时降级为全量扫描。
+        similarities: dict[str, float] = {}
+        retrieval_meta: dict[str, dict[str, Any]] = {}
+        retrieval_method = "full_scan"
+        candidate_jobs: list[dict[str, Any]] | None = None
+        if embed_fn is not None and hasattr(self.repo, "search_jobs_by_embedding"):
+            candidate_vec = embed_fn(build_candidate_text(candidate))
+            if candidate_vec is not None:
+                hits = self.repo.search_jobs_by_embedding(candidate_vec, RECALL_LIMIT)
+                if hits:
+                    retrieval_method = "pgvector"
+                    candidate_jobs = []
+                    for rank, (job, similarity) in enumerate(hits, start=1):
+                        candidate_jobs.append(job)
+                        similarities[job["id"]] = similarity
+                        retrieval_meta[job["id"]] = {
+                            "method": "pgvector",
+                            "similarity": round(similarity, 4),
+                            "rank": rank,
+                            "recall_size": len(hits),
+                        }
+        if candidate_jobs is None:
+            candidate_jobs = self.repo.list("job")
+
         filtered = []
         eligible_jobs = []
-        for job in self.repo.list("job"):
+        for job in candidate_jobs:
             failures = hard_filter(candidate, job, job["id"] in sent_job_ids)
             if failures:
                 filtered.append({"job_id": job["id"], "reasons": failures})
@@ -279,12 +306,32 @@ class AgentService:
 
         scored_jobs = []
         for job in eligible_jobs:
-            scored_jobs.append((job, *score_match(candidate, job, expand_fn, embed_fn)))
+            scored_jobs.append(
+                (
+                    job,
+                    *score_match(
+                        candidate,
+                        job,
+                        expand_fn,
+                        embed_fn,
+                        semantic_similarity=similarities.get(job["id"]),
+                    ),
+                )
+            )
             if expansion_failed:
                 break
         if expansion_failed:
             scored_jobs = [
-                (job, *score_match(candidate, job, embed_fn=embed_fn)) for job in eligible_jobs
+                (
+                    job,
+                    *score_match(
+                        candidate,
+                        job,
+                        embed_fn=embed_fn,
+                        semantic_similarity=similarities.get(job["id"]),
+                    ),
+                )
+                for job in eligible_jobs
             ]
 
         results = []
@@ -299,6 +346,7 @@ class AgentService:
                 "reasons": reasons,
                 "rule_version": RULE_VERSION,
                 "job_version": job["updated_at"],
+                "retrieval": retrieval_meta.get(job["id"], {"method": "full_scan"}),
                 "created_at": utcnow(),
             }
             self.repo.put("match", match)
@@ -310,7 +358,12 @@ class AgentService:
             "candidate",
             candidate_id,
             actor,
-            {"matched": len(results), "filtered": len(filtered), "rule_version": RULE_VERSION},
+            {
+                "matched": len(results),
+                "filtered": len(filtered),
+                "rule_version": RULE_VERSION,
+                "retrieval_method": retrieval_method,
+            },
         )
         return {"matches": results, "filtered": filtered}
 

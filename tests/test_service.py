@@ -266,5 +266,53 @@ class ServiceWorkflowTest(unittest.TestCase):
         self.assertEqual(len(operation_calls), 1)
 
 
+class FakeVectorRepo(Repository):
+    """SQLite 仓储 + 假 pgvector 检索接口，用于验证召回路径。"""
+
+    def __init__(self):
+        super().__init__(":memory:")
+        self.search_calls = []
+        self.hits = []
+
+    def search_jobs_by_embedding(self, vec, limit=200):
+        self.search_calls.append((vec, limit))
+        return self.hits
+
+
+class VectorRecallTest(unittest.TestCase):
+    def setUp(self):
+        self.repo = FakeVectorRepo()
+        self.service = AgentService(self.repo, embed_fn=lambda text: [0.1, 0.2, 0.3])
+        source = self.service.create_source(source_payload(), "operator")
+        self.service.review_source(source["id"], True, "operator")
+        self.service.sync_source(source["id"], [job_payload()], "worker")
+        self.job = self.repo.list("job")[0]
+        candidate = self.service.create_candidate(candidate_payload(), "candidate")
+        self.candidate = self.service.set_consent(candidate["id"], True, "candidate", "mvp-1")
+
+    def test_pgvector_recall_records_retrieval_evidence(self):
+        self.repo.hits = [(self.job, 0.9)]
+        result = self.service.run_matches(self.candidate["id"], "scheduler")
+        self.assertEqual(len(self.repo.search_calls), 1)
+        match = result["matches"][0]
+        self.assertEqual(match["retrieval"]["method"], "pgvector")
+        self.assertEqual(match["retrieval"]["similarity"], 0.9)
+        self.assertEqual(match["retrieval"]["rank"], 1)
+        self.assertEqual(match["retrieval"]["recall_size"], 1)
+        self.assertEqual(match["score_breakdown"]["semantic"], 1.0)
+
+    def test_empty_recall_falls_back_to_full_scan(self):
+        self.repo.hits = []
+        result = self.service.run_matches(self.candidate["id"], "scheduler")
+        match = result["matches"][0]
+        self.assertEqual(match["retrieval"]["method"], "full_scan")
+
+    def test_no_embed_fn_never_calls_vector_search(self):
+        plain_service = AgentService(self.repo)
+        result = plain_service.run_matches(self.candidate["id"], "scheduler")
+        self.assertEqual(self.repo.search_calls, [])
+        self.assertEqual(result["matches"][0]["retrieval"]["method"], "full_scan")
+
+
 if __name__ == "__main__":
     unittest.main()
