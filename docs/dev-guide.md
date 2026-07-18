@@ -222,6 +222,10 @@ make infra-down  # 停止容器，保留数据卷
 Neo4j 为可选的技能图谱后端。默认本地凭据为 `neo4j` / `agent_hub_graph`，Neo4j Browser 地址为
 http://127.0.0.1:7474，Bolt 地址为 `bolt://127.0.0.1:7687`。
 
+官方 `neo4j:5` 本地镜像的初始管理员用户名必须保持为 `neo4j`，只有密码可以通过
+`NEO4J_PASSWORD` 自定义。应用侧的 `NEO4J_USER` 必须保持为 `neo4j`，且 `NEO4J_PASSWORD`
+必须与启动容器时使用的密码一致。
+
 ### 1. 启动并检查 Neo4j
 
 ```bash

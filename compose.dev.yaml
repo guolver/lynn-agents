@@ -30,16 +30,16 @@ services:
   neo4j:
     image: neo4j:5
     environment:
-      NEO4J_USER: ${NEO4J_USER:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-agent_hub_graph}
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-agent_hub_graph}
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-agent_hub_graph}
+      GRAPH_HEALTH_USER: neo4j
+      GRAPH_HEALTH_PASSWORD: ${NEO4J_PASSWORD:-agent_hub_graph}
     ports:
       - "127.0.0.1:7474:7474"
       - "127.0.0.1:7687:7687"
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u $$NEO4J_USER -p $$NEO4J_PASSWORD 'RETURN 1' || exit 1"]
+      test: ["CMD-SHELL", "cypher-shell -u $$GRAPH_HEALTH_USER -p $$GRAPH_HEALTH_PASSWORD 'RETURN 1' || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
