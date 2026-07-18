@@ -4,11 +4,80 @@ from __future__ import annotations
 
 import neo4j
 
-from .seed import SKILL_GRAPH_SEED
+from .seed import SKILL_GRAPH_SEED, SKILL_RELATIONS
+from .types import ExpansionEvidence, ExpansionResult
+
+
+EDGE_WEIGHTS = {"REQUIRES": 0.75, "CHILD_OF": 0.65, "RELATED_TO": 0.40}
+
+_START = (
+    "UNWIND $names AS input "
+    "MATCH (raw:Skill {name: input}) "
+    "OPTIONAL MATCH (raw)-[:ALIAS_OF]->(alias_target:Skill) "
+    "WITH input, coalesce(alias_target, raw) AS start "
+)
+_RETURN = (
+    "RETURN input, start.name AS canonical, target.name AS target, "
+    "CASE WHEN target:Category THEN 'category' ELSE 'skill' END AS target_kind, "
+    "relations, nodes"
+)
+
+_ONE_HOP = (
+    _START
+    + "MATCH (start)-[:CHILD_OF]->(target:Category) "
+    + "WITH input, start, target, ['CHILD_OF'] AS relations, "
+    + "[start.name, target.name] AS nodes "
+    + _RETURN,
+    _START
+    + "MATCH (start)-[:REQUIRES]->(target:Skill) "
+    + "WITH input, start, target, ['REQUIRES'] AS relations, "
+    + "[start.name, target.name] AS nodes "
+    + _RETURN,
+    _START
+    + "MATCH (start)-[:RELATED_TO]-(target:Skill) "
+    + "WITH input, start, target, ['RELATED_TO'] AS relations, "
+    + "[start.name, target.name] AS nodes "
+    + _RETURN,
+)
+
+_TWO_HOP_BODIES = (
+    "MATCH (start)-[:REQUIRES]->(middle:Skill)-[:REQUIRES]->(target:Skill) "
+    "WITH input, start, middle, target, ['REQUIRES', 'REQUIRES'] AS relations",
+    "MATCH (start)-[:REQUIRES]->(middle:Skill)-[:RELATED_TO]-(target:Skill) "
+    "WITH input, start, middle, target, ['REQUIRES', 'RELATED_TO'] AS relations",
+    "MATCH (start)-[:REQUIRES]->(middle:Skill)-[:CHILD_OF]->(target:Category) "
+    "WITH input, start, middle, target, ['REQUIRES', 'CHILD_OF'] AS relations",
+    "MATCH (start)-[:RELATED_TO]-(middle:Skill)-[:REQUIRES]->(target:Skill) "
+    "WITH input, start, middle, target, ['RELATED_TO', 'REQUIRES'] AS relations",
+    "MATCH (start)-[:RELATED_TO]-(middle:Skill)-[:RELATED_TO]-(target:Skill) "
+    "WITH input, start, middle, target, ['RELATED_TO', 'RELATED_TO'] AS relations",
+    "MATCH (start)-[:RELATED_TO]-(middle:Skill)-[:CHILD_OF]->(target:Category) "
+    "WITH input, start, middle, target, ['RELATED_TO', 'CHILD_OF'] AS relations",
+)
+
+
+def _path_weight(relations: tuple[str, ...]) -> float:
+    base = min(EDGE_WEIGHTS[name] for name in relations)
+    return round(base * (0.5 if len(relations) == 2 else 1.0), 4)
+
+
+def _evidence_queries(max_depth: int) -> tuple[str, ...]:
+    if max_depth == 1:
+        return _ONE_HOP
+    two_hop = tuple(
+        _START
+        + body
+        + " WHERE start <> middle AND start <> target AND middle <> target "
+        + "WITH input, start, target, relations, "
+        + "[start.name, middle.name, target.name] AS nodes "
+        + _RETURN
+        for body in _TWO_HOP_BODIES
+    )
+    return _ONE_HOP + two_hop
 
 
 class SkillGraphService:
-    """Provides alias resolution and category expansion over a Neo4j skill graph."""
+    """Provides alias resolution and bounded relation expansion over a Neo4j skill graph."""
 
     def __init__(self, driver: neo4j.Driver):
         self.driver = driver
@@ -44,6 +113,19 @@ class SkillGraphService:
                             alias=alias,
                             canonical=canonical,
                         )
+            for relation in SKILL_RELATIONS:
+                relation_type = relation["type"]
+                if relation_type == "REQUIRES":
+                    query = (
+                        "MATCH (a:Skill {name: $source}), (b:Skill {name: $target}) "
+                        "MERGE (a)-[:REQUIRES]->(b)"
+                    )
+                else:
+                    query = (
+                        "MATCH (a:Skill {name: $source}), (b:Skill {name: $target}) "
+                        "MERGE (a)-[:RELATED_TO]->(b)"
+                    )
+                session.run(query, source=relation["from"], target=relation["to"])
 
     def resolve(self, name: str) -> str | None:
         """Resolve an alias to its canonical skill name.
@@ -65,24 +147,59 @@ class SkillGraphService:
             return record["resolved"]
 
     def expand(self, names: list[str]) -> set[str]:
-        """Batch resolve aliases and expand to parent categories.
+        """Batch resolve aliases and return depth-one expansion targets.
 
-        Returns a set containing canonical skill names and their parent
-        category names.  Unknown names are silently ignored.
+        Returns a compatibility set containing canonical skill names, parent
+        categories, requirements, and related skills. Unknown names are
+        silently ignored.
         """
+        return self.expand_with_evidence(names, max_depth=1).targets()
+
+    def expand_with_evidence(self, names: list[str], *, max_depth: int = 2) -> ExpansionResult:
+        """Expand skills through an explicit, bounded relation query matrix."""
+        if max_depth not in (1, 2):
+            raise ValueError("max_depth must be 1 or 2")
         if not names:
-            return set()
+            return ExpansionResult()
+
+        rows: list[dict] = []
         with self.driver.session() as session:
-            result = session.run(
-                "UNWIND $names AS input "
-                "MATCH (s:Skill {name: input}) "
-                "OPTIONAL MATCH (s)-[:ALIAS_OF]->(canonical:Skill) "
-                "WITH coalesce(canonical, s) AS resolved "
-                "OPTIONAL MATCH (resolved)-[:CHILD_OF]->(cat:Category) "
-                "RETURN collect(DISTINCT resolved.name) + collect(DISTINCT cat.name) AS expanded",
-                names=names,
+            rows.extend(
+                session.run(
+                    "UNWIND $names AS input "
+                    "MATCH (raw {name: input}) WHERE raw:Skill OR raw:Category "
+                    "OPTIONAL MATCH (raw:Skill)-[:ALIAS_OF]->(canonical:Skill) "
+                    "WITH input, coalesce(canonical, raw) AS start "
+                    "RETURN input, start.name AS canonical, start.name AS target, "
+                    "CASE WHEN start:Category THEN 'category' ELSE 'skill' END AS target_kind, "
+                    "[] AS relations, [start.name] AS nodes",
+                    names=names,
+                ).data()
             )
-            record = result.single()
-            if record is None:
-                return set()
-            return set(record["expanded"])
+            for query in _evidence_queries(max_depth):
+                rows.extend(session.run(query, names=names).data())
+
+        evidence = []
+        seen = set()
+        for row in rows:
+            relations = tuple(row["relations"])
+            nodes = tuple(row["nodes"])
+            if len(nodes) != len(set(nodes)):
+                continue
+            key = (row["input"], row["target"], relations, nodes)
+            if key in seen:
+                continue
+            seen.add(key)
+            evidence.append(
+                ExpansionEvidence(
+                    input_skill=row["input"],
+                    canonical_skill=row["canonical"],
+                    target=row["target"],
+                    target_kind=row["target_kind"],
+                    relations=relations,
+                    nodes=nodes,
+                    depth=len(relations),
+                    weight=1.0 if not relations else _path_weight(relations),
+                )
+            )
+        return ExpansionResult.from_iterable(evidence)

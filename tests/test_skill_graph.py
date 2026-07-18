@@ -124,6 +124,33 @@ class SkillGraphServiceTest(unittest.TestCase):
         result = self.service.expand(["NonExistent"])
         self.assertEqual(result, set())
 
+    def test_expand_with_evidence_rejects_invalid_depth(self):
+        with self.assertRaisesRegex(ValueError, "max_depth must be 1 or 2"):
+            self.service.expand_with_evidence(["React"], max_depth=3)
+
+    def test_requires_is_directional(self):
+        forward = self.service.expand_with_evidence(["Kubernetes"], max_depth=1)
+        reverse = self.service.expand_with_evidence(["Docker"], max_depth=1)
+        self.assertTrue(
+            any(x.target == "Docker" and x.relations == ("REQUIRES",) for x in forward.evidence)
+        )
+        self.assertFalse(
+            any(x.target == "Kubernetes" and "REQUIRES" in x.relations for x in reverse.evidence)
+        )
+
+    def test_related_to_is_symmetric(self):
+        react = self.service.expand_with_evidence(["React"], max_depth=1)
+        vue = self.service.expand_with_evidence(["Vue"], max_depth=1)
+        self.assertTrue(any(x.target == "Vue" and x.weight == 0.4 for x in react.evidence))
+        self.assertTrue(any(x.target == "React" and x.weight == 0.4 for x in vue.evidence))
+
+    def test_two_hop_weight_and_cycle_protection(self):
+        result = self.service.expand_with_evidence(["Next.js"], max_depth=2)
+        vue_paths = [x for x in result.evidence if x.target == "Vue" and x.depth == 2]
+        self.assertEqual(len(vue_paths), 1)
+        self.assertEqual(vue_paths[0].weight, 0.2)
+        self.assertEqual(len(vue_paths[0].nodes), len(set(vue_paths[0].nodes)))
+
     def test_seed_is_idempotent(self):
         self.service.seed()
         self.service.seed()
