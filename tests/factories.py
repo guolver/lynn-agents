@@ -5,6 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 
+def ensure_vector_extension(engine) -> None:
+    """在 create_all 之前确保 pgvector 扩展存在（jobs.embedding 列需要）。"""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
+
+
 def source_payload() -> dict[str, Any]:
     """Return a fresh valid job-source payload."""
     return {

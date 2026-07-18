@@ -19,14 +19,12 @@ class PostgresConcurrencyTest(unittest.TestCase):
         from agent_hub.database.models import Base
         from agent_hub.database.repository import PostgresRepository
 
+        from tests.factories import ensure_vector_extension
+
         self.repo1 = PostgresRepository(TEST_DATABASE_URL)
         self.repo2 = PostgresRepository(TEST_DATABASE_URL)
 
-        from sqlalchemy import text
-
-        with self.repo1._engine.connect() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            conn.commit()
+        ensure_vector_extension(self.repo1._engine)
 
         Base.metadata.drop_all(self.repo1._engine)
         Base.metadata.create_all(self.repo1._engine)

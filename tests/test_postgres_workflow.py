@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import unittest
 
-from tests.factories import candidate_payload, job_payload, source_payload
+from tests.factories import candidate_payload, ensure_vector_extension, job_payload, source_payload
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -23,11 +23,7 @@ class PostgresWorkflowTest(unittest.TestCase):
 
         self.repo = PostgresRepository(TEST_DATABASE_URL)
 
-        from sqlalchemy import text
-
-        with self.repo._engine.connect() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            conn.commit()
+        ensure_vector_extension(self.repo._engine)
 
         Base.metadata.drop_all(self.repo._engine)
         Base.metadata.create_all(self.repo._engine)

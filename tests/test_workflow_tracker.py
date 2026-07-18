@@ -11,6 +11,7 @@ import unittest
 from sqlalchemy import create_engine
 
 from agent_hub.database.models import Base
+from tests.factories import ensure_vector_extension
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -20,6 +21,7 @@ class TestWorkflowTracker(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.engine = create_engine(TEST_DATABASE_URL)
+        ensure_vector_extension(cls.engine)
         Base.metadata.create_all(cls.engine)
 
     @classmethod
