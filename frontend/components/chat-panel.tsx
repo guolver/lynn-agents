@@ -3,11 +3,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChatMessage } from './chat-message';
 
+import { EMPTY_STATE_SUGGESTIONS } from '../lib/chat-suggestions';
+
 type Message = {
   id: string;
   role: 'user' | 'assistant' | 'tool';
   content: string;
   toolData?: { name: string; result?: Record<string, unknown> };
+};
+
+type AnalysisResult = {
+  summary?: string;
+  matches?: Array<Record<string, unknown>>;
 };
 
 // Parse a streamed SSE body frame-by-frame.
@@ -62,26 +69,45 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [, setSelectedJobId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load history on mount
+  // Load history on mount. Tool messages carrying run_matches results are not
+  // rendered directly; instead their match cards are re-attached to the
+  // preceding assistant message so cards survive a page refresh.
   useEffect(() => {
     fetch(`/api/chat/sessions/${sessionId}`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.messages) {
-          setMessages(
-            data.messages
-              .filter((m: Record<string, unknown>) => m.role !== 'tool')
-              .map((m: Record<string, unknown>) => ({
-                id: m.id,
-                role: m.role,
-                content: m.content,
-              })),
-          );
+        if (!Array.isArray(data.messages)) return;
+        const rebuilt: Message[] = [];
+        for (const m of data.messages as Array<Record<string, unknown>>) {
+          if (m.role === 'tool') {
+            try {
+              const parsed = JSON.parse(m.content as string);
+              const matches = parsed?.result?.matches;
+              if (parsed?.name === 'run_matches' && Array.isArray(matches) && matches.length) {
+                for (let i = rebuilt.length - 1; i >= 0; i--) {
+                  if (rebuilt[i].role === 'assistant') {
+                    rebuilt[i] = { ...rebuilt[i], toolData: { name: 'run_matches', result: { matches } } };
+                    break;
+                  }
+                }
+              }
+            } catch {
+              // ignore malformed tool payloads
+            }
+            continue;
+          }
+          rebuilt.push({
+            id: m.id as string,
+            role: m.role as Message['role'],
+            content: m.content as string,
+          });
         }
+        setMessages(rebuilt);
       })
       .catch(() => {});
   }, [sessionId]);
@@ -156,15 +182,71 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     }
   }
 
-  async function handleSend() {
-    const text = input.trim();
-    if (!text || isStreaming) return;
-    setInput('');
+  async function sendPrompt(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || isStreaming || isUploading) return;
 
-    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text };
+    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: trimmed };
     setMessages((prev) => [...prev, userMsg]);
 
-    await streamAssistant(text);
+    await streamAssistant(trimmed);
+  }
+
+  async function handleSend() {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    await sendPrompt(text);
+  }
+
+  // Render a completed analysis (summary text + match cards) into the placeholder.
+  function applyAnalysisResult(assistantId: string, result: AnalysisResult | undefined) {
+    const matches = result?.matches;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === assistantId
+          ? {
+              ...m,
+              content: result?.summary ?? '匹配完成。',
+              toolData:
+                matches && matches.length
+                  ? { name: 'run_matches', result: { matches } }
+                  : undefined,
+            }
+          : m,
+      ),
+    );
+  }
+
+  function setAssistantText(assistantId: string, text: string) {
+    setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m)));
+  }
+
+  // Poll the async resume-analysis task until it succeeds or fails.
+  async function pollAnalysis(taskId: string, assistantId: string) {
+    const intervalMs = 3000;
+    const maxAttempts = 120; // ~6 min, matches the backend Celery time limit
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((r) => setTimeout(r, intervalMs));
+      let data: { status?: string; result?: AnalysisResult; error?: string } | null = null;
+      try {
+        const r = await fetch(`/api/chat/tasks/${taskId}`);
+        data = await r.json();
+      } catch {
+        continue; // transient network error — keep polling
+      }
+      const status = data?.status;
+      if (status === 'SUCCESS') {
+        applyAnalysisResult(assistantId, data?.result);
+        return;
+      }
+      if (status === 'FAILURE') {
+        setAssistantText(assistantId, `分析失败：${data?.error ?? '未知错误'}`);
+        return;
+      }
+      // PENDING / STARTED / RETRY → keep waiting
+    }
+    setAssistantText(assistantId, '分析超时，请稍后重试。');
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -180,19 +262,35 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         method: 'POST',
         body: formData,
       });
-      if (res.ok) {
-        const userMsg: Message = {
-          id: crypto.randomUUID(),
-          role: 'user',
-          content: `已上传简历: ${file.name}`,
-        };
-        setMessages((prev) => [...prev, userMsg]);
-        await streamAssistant(
-          'I just uploaded my resume. Please use the parse_resume tool on the resume text from my previous message to extract my profile, then run_matches to find suitable jobs.',
-        );
-      } else {
-        const data = await res.json();
-        alert(data.detail ?? 'Upload failed');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.detail ?? '上传失败');
+        return;
+      }
+
+      const data = await res.json();
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: `已上传简历：${file.name}`,
+      };
+      const assistantId = crypto.randomUUID();
+      setMessages((prev) => [
+        ...prev,
+        userMsg,
+        { id: assistantId, role: 'assistant', content: '正在解析简历并匹配岗位，请稍候…' },
+      ]);
+      setIsStreaming(true);
+      try {
+        if (data.status === 'completed' && data.result) {
+          applyAnalysisResult(assistantId, data.result); // synchronous fallback (no Celery)
+        } else if (data.task_id) {
+          await pollAnalysis(data.task_id, assistantId);
+        } else {
+          setAssistantText(assistantId, '无法启动分析任务。');
+        }
+      } finally {
+        setIsStreaming(false);
       }
     } catch {
       alert('上传失败');
@@ -217,7 +315,23 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           {messages.length === 0 && (
             <div className="gpt-empty">
               <div className="gpt-empty-logo">AH</div>
-              <p>有什么可以帮你的？</p>
+              <h2 className="gpt-empty-title">我是 Agent Hub 求职助手</h2>
+              <p className="gpt-empty-sub">上传简历、搜索岗位、智能匹配、管理求职偏好 —— 有什么可以帮你的？</p>
+              <div className="gpt-empty-cards">
+                {EMPTY_STATE_SUGGESTIONS.map((s) => (
+                  <button
+                    key={s.label}
+                    className="gpt-empty-card"
+                    disabled={isStreaming || isUploading}
+                    onClick={() =>
+                      s.action === 'upload' ? fileInputRef.current?.click() : sendPrompt(s.prompt!)
+                    }
+                  >
+                    <span className="gpt-empty-card-icon">{s.icon}</span>
+                    <span>{s.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {messages.map((msg) => (
@@ -226,6 +340,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
               role={msg.role}
               content={msg.content}
               toolData={msg.toolData}
+              onCardClick={setSelectedJobId}
               isStreaming={
                 isStreaming && msg.id === messages[messages.length - 1]?.id && msg.role === 'assistant'
               }
@@ -284,6 +399,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         </div>
         <div className="gpt-disclaimer">Agent Hub 可能会出错。请核实重要信息。</div>
       </div>
+
     </div>
   );
 }
