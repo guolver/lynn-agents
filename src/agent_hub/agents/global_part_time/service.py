@@ -17,6 +17,7 @@ from .domain import (
     canonicalize_url,
     dedup_key,
     hard_filter,
+    score_match,
     score_match_with_evidence,
     utcnow,
 )
@@ -242,7 +243,7 @@ class AgentService:
                 continue
             eligible_jobs.append(job)
 
-        mode = "graph" if self.expand_evidence_fn else "direct"
+        mode = "graph" if self.expand_evidence_fn or self.expand_fn else "direct"
         callback_error: Exception | None = None
 
         def expand_evidence(names: list[str]) -> ExpansionResult:
@@ -254,11 +255,28 @@ class AgentService:
                 callback_error = exc
                 raise
 
+        def expand_legacy(names: list[str]) -> set[str]:
+            nonlocal callback_error
+            assert self.expand_fn is not None
+            try:
+                return self.expand_fn(names)
+            except Exception as exc:
+                callback_error = exc
+                raise
+
         rich_callback = expand_evidence if self.expand_evidence_fn is not None else None
+        legacy_callback = expand_legacy if self.expand_fn is not None else None
+
+        def score_job(job: dict[str, Any]):
+            if rich_callback is not None:
+                return score_match_with_evidence(candidate, job, rich_callback)
+            if legacy_callback is not None:
+                score, breakdown, reasons = score_match(candidate, job, legacy_callback)
+                return score, breakdown, reasons, {"requirements": []}
+            return score_match_with_evidence(candidate, job)
+
         try:
-            scored = [
-                score_match_with_evidence(candidate, job, rich_callback) for job in eligible_jobs
-            ]
+            scored = [score_job(job) for job in eligible_jobs]
         except Exception:
             if callback_error is None:
                 raise

@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from agent_hub.agents.global_part_time.domain import score_match_with_evidence
 from agent_hub.agents.global_part_time.repository import Repository
 from agent_hub.agents.global_part_time.service import AgentService, PolicyError
 from agent_hub.skill_graph.types import ExpansionEvidence, ExpansionResult
@@ -163,7 +164,27 @@ class ServiceWorkflowTest(unittest.TestCase):
         self.assertEqual(match["skill_graph_evidence"]["mode"], "graph")
         self.assertEqual(match["skill_graph_evidence"]["requirements"][0]["score"], 0.75)
         self.assertNotIn("exception", match["skill_graph_evidence"])
-        self.assertEqual(stored["skill_graph_evidence"], match["skill_graph_evidence"])
+        self.assertEqual(stored, match)
+
+    def test_legacy_expand_callback_preserves_indirect_skill_scoring(self):
+        self.service.review_source(self.source["id"], True, "operator")
+        graph_job = dict(self.job, skills=["前端开发"])
+        self.service.sync_source(self.source["id"], [graph_job], "worker")
+        candidate = self.candidate()
+        candidate["skills"] = [{"name": "React", "level": 4}]
+        self.repo.put("candidate", candidate)
+
+        def expand(names):
+            return {"React", "前端开发"} if names else set()
+
+        service = AgentService(self.repo, expand_fn=expand)
+        match = service.run_matches(candidate["id"], "scheduler")["matches"][0]
+
+        self.assertEqual(match["score_breakdown"]["skills"], 0.6)
+        self.assertEqual(
+            match["skill_graph_evidence"],
+            {"mode": "graph", "max_depth": 2, "requirements": []},
+        )
 
     def test_no_graph_uses_direct_mode(self):
         self.service.review_source(self.source["id"], True, "operator")
@@ -197,16 +218,25 @@ class ServiceWorkflowTest(unittest.TestCase):
         candidate = self.candidate()
         candidate["skills"] = [{"name": "React", "level": 4}]
         self.repo.put("candidate", candidate)
+        match_writes = []
+        original_put = self.repo.put
+
+        def track_match_writes(kind, item):
+            if kind == "match":
+                match_writes.append(item)
+            return original_put(kind, item)
 
         def fail_on_backend(names):
             if names == ["后端开发"]:
+                self.assertEqual(match_writes, [])
                 raise RuntimeError("secret bolt URI")
             return ExpansionResult.from_iterable(
                 ExpansionEvidence(name, name, name, "skill", (), (name,), 0, 1.0) for name in names
             )
 
         self.service.expand_evidence_fn = fail_on_backend
-        result = self.service.run_matches(candidate["id"], "scheduler")
+        with patch.object(self.repo, "put", side_effect=track_match_writes):
+            result = self.service.run_matches(candidate["id"], "scheduler")
         self.assertEqual(len(result["matches"]), 2)
         for match in self.repo.list("match"):
             self.assertEqual(match["skill_graph_evidence"]["mode"], "direct_fallback")
@@ -292,20 +322,26 @@ class ServiceWorkflowTest(unittest.TestCase):
                     return original_list(kind)
 
                 calls = 0
+                match_writes = []
+                original_put = repo.put
+
+                def track_match_writes(kind, item):
+                    if kind == "match":
+                        match_writes.append(item)
+                    return original_put(kind, item)
 
                 def graph_fails_on_second_job(names):
                     nonlocal calls
                     calls += 1
                     if calls == 3:
+                        self.assertEqual(match_writes, [])
                         raise RuntimeError("graph failed on second job")
-                    return ExpansionResult.from_iterable(
-                        ExpansionEvidence(name, name, name, "skill", (), (name,), 0, 1.0)
-                        for name in names
-                    )
+                    return {"React", "前端开发", "后端开发"}
 
-                service.expand_evidence_fn = graph_fails_on_second_job
+                service.expand_fn = graph_fails_on_second_job
                 with (
                     patch.object(repo, "list", side_effect=list_in_order),
+                    patch.object(repo, "put", side_effect=track_match_writes),
                     self.assertLogs("agent_hub.agents.global_part_time.service", level="WARNING"),
                 ):
                     result = service.run_matches(candidate["id"], "scheduler")
@@ -321,15 +357,49 @@ class ServiceWorkflowTest(unittest.TestCase):
 
     def test_match_run_does_not_mask_scoring_failures(self):
         self.service.review_source(self.source["id"], True, "operator")
-        self.service.sync_source(self.source["id"], [self.job], "worker")
+        jobs = [
+            dict(
+                self.job,
+                source_job_id="first",
+                canonical_url="https://feed.example.com/jobs/first",
+                title_original="First Specialist",
+            ),
+            dict(
+                self.job,
+                source_job_id="second",
+                canonical_url="https://feed.example.com/jobs/second",
+                title_original="Second Specialist",
+            ),
+        ]
+        self.service.sync_source(self.source["id"], jobs, "worker")
         candidate = self.candidate()
+        calls = 0
+        match_writes = []
+        original_put = self.repo.put
 
-        with patch(
-            "agent_hub.agents.global_part_time.service.score_match_with_evidence",
-            side_effect=RuntimeError("scoring bug"),
+        def fail_on_later_job(*args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("scoring bug")
+            return score_match_with_evidence(*args)
+
+        def track_match_writes(kind, item):
+            if kind == "match":
+                match_writes.append(item)
+            return original_put(kind, item)
+
+        with (
+            patch(
+                "agent_hub.agents.global_part_time.service.score_match_with_evidence",
+                side_effect=fail_on_later_job,
+            ),
+            patch.object(self.repo, "put", side_effect=track_match_writes),
         ):
             with self.assertRaisesRegex(RuntimeError, "scoring bug"):
                 self.service.run_matches(candidate["id"], "scheduler")
+        self.assertEqual(match_writes, [])
+        self.assertEqual(self.repo.list("match"), [])
 
     def test_unsubscribe_is_immediate_and_deletion_removes_personal_data(self):
         candidate = self.candidate()
