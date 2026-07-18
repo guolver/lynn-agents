@@ -20,6 +20,6 @@ def create_neo4j_driver(
     resolved_uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
     resolved_auth = auth or (
         os.getenv("NEO4J_USER", "neo4j"),
-        os.getenv("NEO4J_PASSWORD", "password"),
+        os.getenv("NEO4J_PASSWORD", "agent_hub_graph"),
     )
     return neo4j.GraphDatabase.driver(resolved_uri, auth=resolved_auth, **kwargs)

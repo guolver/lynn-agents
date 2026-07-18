@@ -316,6 +316,10 @@ def _graph_skill_score(
     required_raw = list(job.get("skills") or [])
     candidate_expansion = expand_evidence_fn(owned_raw)
     required_expansions = {required: expand_evidence_fn([required]) for required in required_raw}
+    owned_raw_by_normalized = {
+        normalized: min(name for name in owned_raw if _norm(name) == normalized)
+        for normalized in {_norm(name) for name in owned_raw}
+    }
 
     owned_zero = _canonical_zero_paths(candidate_expansion)
     owned_canonical = {
@@ -333,6 +337,24 @@ def _graph_skill_score(
         required_canonical = required_zero[0].canonical_skill if required_zero else required
         required_kind = required_zero[0].target_kind if required_zero else None
         path_candidates: list[tuple[ExpansionEvidence, str]] = []
+
+        direct_raw_skill = owned_raw_by_normalized.get(_norm(required))
+        if direct_raw_skill is not None and not required_zero:
+            path_candidates.append(
+                (
+                    ExpansionEvidence(
+                        input_skill=required,
+                        canonical_skill=required,
+                        target=required,
+                        target_kind="skill",
+                        relations=(),
+                        nodes=(required,),
+                        depth=0,
+                        weight=1.0,
+                    ),
+                    direct_raw_skill,
+                )
+            )
 
         # Canonical equality covers both direct names and aliases normalized by the graph.
         for required_path in required_zero:

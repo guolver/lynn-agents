@@ -1,3 +1,4 @@
+import json
 import unittest
 
 
@@ -31,7 +32,7 @@ class SeedAliasValidationTest(unittest.TestCase):
 class Neo4jConfigTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.container = Neo4jContainer("neo4j:5")
+        cls.container = Neo4jContainer("neo4j:5", password="test")
         cls.container.start()
         cls.bolt_url = cls.container.get_connection_url()
 
@@ -51,7 +52,7 @@ class Neo4jConfigTest(unittest.TestCase):
 class SeedDataTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.container = Neo4jContainer("neo4j:5")
+        cls.container = Neo4jContainer("neo4j:5", password="test")
         cls.container.start()
         cls.bolt_url = cls.container.get_connection_url()
 
@@ -83,7 +84,7 @@ class SeedDataTest(unittest.TestCase):
 class SkillGraphServiceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.container = Neo4jContainer("neo4j:5")
+        cls.container = Neo4jContainer("neo4j:5", password="test")
         cls.container.start()
         bolt_url = cls.container.get_connection_url()
         from agent_hub.skill_graph.config import create_neo4j_driver
@@ -163,7 +164,7 @@ class EndToEndSkillMatchTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.container = Neo4jContainer("neo4j:5")
+        cls.container = Neo4jContainer("neo4j:5", password="test")
         cls.container.start()
         bolt_url = cls.container.get_connection_url()
         from agent_hub.skill_graph.config import create_neo4j_driver
@@ -247,3 +248,47 @@ class EndToEndSkillMatchTest(unittest.TestCase):
             reasons[0],
             "候选人技能Docker通过REQUIRES与职位要求Kubernetes匹配",
         )
+
+    def test_real_graph_match_persists_exact_sanitized_evidence(self):
+        from agent_hub.agents.global_part_time.repository import Repository
+        from agent_hub.agents.global_part_time.service import AgentService
+        from tests.factories import candidate_payload, job_payload, source_payload
+
+        repo = Repository(":memory:")
+        service = AgentService(repo, expand_evidence_fn=self.service.expand_with_evidence)
+        source = service.create_source(source_payload(), "operator")
+        service.review_source(source["id"], True, "operator")
+        graph_job = dict(job_payload(), skills=["Kubernetes"])
+        service.sync_source(source["id"], [graph_job], "worker")
+        candidate = service.create_candidate(
+            dict(candidate_payload(), skills=[{"name": "Docker", "level": 4}]),
+            "candidate",
+        )
+        candidate = service.set_consent(candidate["id"], True, "candidate", "mvp-1")
+
+        returned = service.run_matches(candidate["id"], "scheduler")["matches"][0]
+        stored = repo.get("match", returned["id"])
+        expected_requirement = {
+            "required_skill": "Kubernetes",
+            "candidate_skill": "Docker",
+            "score": 0.75,
+            "path": {
+                "input_skill": "Kubernetes",
+                "canonical_skill": "Kubernetes",
+                "target": "Docker",
+                "target_kind": "skill",
+                "relations": ["REQUIRES"],
+                "nodes": ["Kubernetes", "Docker"],
+                "depth": 1,
+                "weight": 0.75,
+            },
+        }
+
+        self.assertEqual(returned["skill_graph_evidence"]["mode"], "graph")
+        self.assertEqual(returned["score_breakdown"]["skills"], 0.75)
+        self.assertEqual(
+            returned["skill_graph_evidence"]["requirements"],
+            [expected_requirement],
+        )
+        self.assertNotIn("exception", json.dumps(returned, ensure_ascii=False).casefold())
+        self.assertEqual(stored, returned)

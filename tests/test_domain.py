@@ -182,6 +182,41 @@ class SkillScoreExpansionTest(unittest.TestCase):
 
 
 class WeightedSkillEvidenceTest(unittest.TestCase):
+    def test_identical_unknown_skill_keeps_direct_score_and_evidence(self):
+        def expand(_names):
+            return ExpansionResult()
+
+        _, breakdown, reasons, graph = score_match_with_evidence(
+            {"skills": [{"name": "WebAssembly"}]},
+            {"skills": ["WebAssembly"]},
+            expand,
+        )
+
+        self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(reasons[0], "技能WebAssembly与职位要求WebAssembly直接匹配")
+        self.assertEqual(
+            graph,
+            {
+                "requirements": [
+                    {
+                        "required_skill": "WebAssembly",
+                        "candidate_skill": "WebAssembly",
+                        "score": 1.0,
+                        "path": {
+                            "input_skill": "WebAssembly",
+                            "canonical_skill": "WebAssembly",
+                            "target": "WebAssembly",
+                            "target_kind": "skill",
+                            "relations": [],
+                            "nodes": ["WebAssembly"],
+                            "depth": 0,
+                            "weight": 1.0,
+                        },
+                    }
+                ]
+            },
+        )
+
     def test_direct_and_alias_match_score_one(self):
         # K8s canonicalizes to Kubernetes on the required side.
         def expand(names):
