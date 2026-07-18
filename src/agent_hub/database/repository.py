@@ -21,6 +21,8 @@ from agent_hub.database.models import (
     AuditLog,
     Base,
     Candidate,
+    ChatMessage,
+    ChatSession,
     Feedback,
     IdempotencyRecord,
     Job,
@@ -45,6 +47,8 @@ _KIND_MAP: dict[str, type[Base]] = {
     "approval": Approval,
     "notification": Notification,
     "feedback": Feedback,
+    "chat_session": ChatSession,
+    "chat_message": ChatMessage,
 }
 
 # Typed columns to populate from payload for each kind.
@@ -93,6 +97,18 @@ _TYPED_COLUMNS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
         "match_id": p.get("match_id", ""),
         "candidate_id": p.get("candidate_id", ""),
         "value": p.get("value", ""),
+    },
+    "chat_session": lambda p: {
+        "candidate_id": p.get("candidate_id"),
+        "actor": p.get("actor", "anonymous"),
+        "status": p.get("status", "active"),
+    },
+    "chat_message": lambda p: {
+        "session_id": p.get("session_id", ""),
+        "role": p.get("role", "user"),
+        "content": p.get("content", ""),
+        "tool_calls": p.get("tool_calls"),
+        "tool_call_id": p.get("tool_call_id"),
     },
 }
 
@@ -196,6 +212,38 @@ class PostgresRepository:
                 .all()
             )
             return [dict(row.payload) for row in rows]
+        finally:
+            if owns_session:
+                session.close()
+
+    def list_by_session(self, session_id: str) -> list[dict[str, Any]]:
+        """Return all chat messages for a session, ordered by creation time ascending."""
+        session = self._session()
+        owns_session = not self._is_context_session()
+        try:
+            from agent_hub.database.models import ChatMessage
+
+            rows = (
+                session.execute(
+                    select(ChatMessage)
+                    .filter_by(session_id=session_id)
+                    .order_by(ChatMessage.created_at.asc())
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "session_id": row.session_id,
+                    "role": row.role,
+                    "content": row.content,
+                    "tool_calls": row.tool_calls,
+                    "tool_call_id": row.tool_call_id,
+                    "created_at": row.created_at.isoformat() if row.created_at else "",
+                }
+                for row in rows
+            ]
         finally:
             if owns_session:
                 session.close()
