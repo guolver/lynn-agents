@@ -49,7 +49,7 @@ docs/                             # 架构文档
 |---|------|
 | 后端 | Python 3.10+, FastAPI, Pydantic, Uvicorn |
 | 前端 | Next.js 16, React 19, Tailwind CSS 4, Drizzle ORM |
-| 数据库 | SQLite（MVP），可迁移至 PostgreSQL |
+| 数据库 | PostgreSQL + pgvector（compose 默认）/ SQLite（本地裸跑 MVP） |
 | 部署 | Cloudflare Workers（前端） |
 
 ## 开发命令
@@ -67,6 +67,9 @@ cd frontend
 pnpm dev                                  # 启动前端
 pnpm lint                                 # ESLint 检查
 pnpm build                                # 构建
+
+# 全栈
+docker compose up --build                 # 全栈启动（api+worker+beat+PG+Redis+Neo4j+frontend）
 ```
 
 ## 代码规范

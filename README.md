@@ -8,13 +8,34 @@
 
 ## 启动
 
+### Docker Compose（推荐）
+
+```bash
+docker compose up --build
+```
+
+前后端一键启动，支持热重载——修改本地代码后容器内自动生效。
+
+| 服务 | 地址 |
+|------|------|
+| 前端（Next.js） | http://localhost:3000 |
+| 后端（FastAPI） | http://localhost:8000 |
+
+### 本地启动
+
 推荐 Python 3.12（最低兼容 3.10）：
 
 ```bash
+# 后端
 python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 uvicorn agent_hub.app:app --reload
+
+# 前端
+cd frontend
+pnpm install
+pnpm dev
 ```
 
 打开 `http://localhost:8000/docs` 使用交互式 API。旧启动命令 `part_time_agent.api:app` 和原有 `/api/v1` 路由仍然兼容。
