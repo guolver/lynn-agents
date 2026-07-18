@@ -214,3 +214,32 @@ alembic downgrade base && alembic upgrade head
 ```bash
 make infra-down  # 停止容器，保留数据卷
 ```
+
+---
+
+## 五、Neo4j 技能图谱开发环境（可选）
+
+Neo4j 为可选的技能图谱后端。默认本地凭据为 `neo4j` / `agent_hub_graph`，Neo4j Browser 地址为
+http://127.0.0.1:7474，Bolt 地址为 `bolt://127.0.0.1:7687`。
+
+### 1. 启动并检查 Neo4j
+
+```bash
+docker compose -f compose.dev.yaml up -d neo4j --wait
+docker compose -f compose.dev.yaml ps neo4j
+```
+
+### 2. 使用 Neo4j 启动应用
+
+```bash
+NEO4J_URI=bolt://127.0.0.1:7687 uvicorn agent_hub.app:app --reload
+```
+
+应用启动时会使用 `MERGE` 幂等地写入技能图谱种子数据；应用关闭时会关闭 Neo4j driver。
+如果未配置 Neo4j，或 Neo4j 连接/查询失败，职位匹配会自动使用确定性的直接匹配回退路径。
+
+### 3. 运行 Neo4j 集成测试
+
+```bash
+make test-neo4j
+```

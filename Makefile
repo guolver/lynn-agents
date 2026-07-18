@@ -1,4 +1,4 @@
-.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg format clean infra infra-up infra-down migrate
+.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg test-neo4j format clean infra infra-up infra-down migrate
 
 # — 初始化 ————————————————————————————————————
 
@@ -41,10 +41,13 @@ test-pg: ## PostgreSQL 集成测试（需要运行 make infra-up && make migrate
 	. .venv/bin/activate && TEST_DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@127.0.0.1:5432/agent_hub_test \
 		python -m unittest tests.test_postgres_repository tests.test_postgres_concurrency tests.test_postgres_workflow -v
 
+test-neo4j: ## Neo4j skill graph integration tests (requires Docker image neo4j:5)
+	. .venv/bin/activate && python -m pytest tests/test_skill_graph.py -v
+
 # — 基础设施 ————————————————————————————————————
 
-infra-up: infra ## 启动本地 PostgreSQL 和 Redis
-infra: ## 启动本地 PostgreSQL 和 Redis
+infra-up: infra ## 启动本地 PostgreSQL、Redis 和 Neo4j
+infra: ## 启动本地 PostgreSQL、Redis 和 Neo4j
 	docker compose -f compose.dev.yaml up -d --wait
 
 infra-down: ## 停止基础设施（保留数据卷）
