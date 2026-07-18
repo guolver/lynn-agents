@@ -117,6 +117,7 @@ class CandidateCreate(APIModel):
     )
     notification_frequency: Literal["daily", "weekly", "paused"] = "daily"
     excluded_companies: list[str] = Field(default_factory=list)
+    resume_summary: str | None = None
 
 
 class CandidatePreferences(APIModel):
@@ -685,6 +686,15 @@ def get_chat_session(session_id: str, request: Request) -> dict[str, Any]:
     return result
 
 
+@router.delete("/chat/sessions/{session_id}")
+def delete_chat_session(session_id: str, request: Request):
+    chat_svc = request.app.state.chat_service
+    found = chat_svc.delete_session(session_id)
+    if not found:
+        return JSONResponse(status_code=404, content={"detail": "Session not found"})
+    return {"ok": True}
+
+
 @router.post("/chat/sessions/{session_id}/messages")
 def send_chat_message(
     session_id: str,
@@ -735,7 +745,28 @@ def upload_chat_resume(
     if not text.strip():
         return JSONResponse(status_code=422, content={"detail": "无法从 PDF 中提取文本"})
 
-    # Store extracted text as user message for LLM context
+    # Store extracted text as user message for LLM context / later reference.
     chat_svc.add_message(session_id, "user", f"[简历内容]\n{text}")
 
-    return {"session_id": session_id, "resume_text_length": len(text), "status": "uploaded"}
+    # Celery 可用时：异步跑「解析 + 匹配」流水线，立刻返回 task_id 供前端轮询。
+    if _celery_available(request):
+        from agent_hub.worker.tasks import parse_and_match_chat_task
+
+        async_result = parse_and_match_chat_task.delay(session_id, text, actor)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "session_id": session_id,
+                "task_id": async_result.id,
+                "status": "processing",
+            },
+        )
+
+    # 无 Celery 的同步 fallback：直接跑完流水线再返回结果。
+    try:
+        result = chat_svc.run_analysis(session_id, text, actor)
+    except Exception as exc:  # noqa: BLE001 - surface parse/match failures to the client
+        logging.getLogger(__name__).exception("chat resume analysis failed")
+        return JSONResponse(status_code=502, content={"detail": f"简历分析失败: {exc}"})
+
+    return {"session_id": session_id, "status": "completed", "result": result}

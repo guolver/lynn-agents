@@ -26,6 +26,7 @@ SYSTEM_PROMPT = """\
 - minimum_hourly_rate: 最低时薪，格式 {amount: 数字, currency: 货币代码}，如果找不到则为 null
 - availability_hours_per_week: 每周可用工时（整数），如果找不到默认 20
 - allowed_work_modes: 工作模式列表，可选值 "remote", "hybrid", "onsite"
+- resume_summary: 100~200 字的职业概要，概括工作方向、核心项目与职责、擅长领域；使用简历原语言；若简历中没有任何工作或项目经历内容则为 null
 
 只返回 JSON 对象，不要任何额外说明。如果某个字段无法从简历中推断，使用合理的默认值。
 """
@@ -72,5 +73,6 @@ def parse_resume(text: str) -> dict:
     parsed.setdefault("desired_roles", [])
     parsed.setdefault("availability_hours_per_week", 20)
     parsed.setdefault("allowed_work_modes", ["remote"])
+    parsed.setdefault("resume_summary", None)
 
     return parsed
