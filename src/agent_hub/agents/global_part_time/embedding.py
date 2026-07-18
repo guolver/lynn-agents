@@ -21,7 +21,7 @@ SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
 _client = None
 
 
-def _get_client():
+def _get_client() -> Any:
     global _client
     if _client is None:
         from openai import OpenAI
@@ -41,9 +41,17 @@ def get_embeddings(texts: list[str]) -> list[list[float] | None]:
     try:
         response = _get_client().embeddings.create(model=EMBEDDING_MODEL, input=payload)
     except Exception as exc:
-        logger.warning("Embedding API call failed: %s", exc)
+        logger.warning("Embedding API call failed: %s", exc, exc_info=True)
         return [None] * len(texts)
-    vectors = iter(item.embedding for item in response.data)
+    data = list(response.data)
+    if len(data) != len(payload):
+        logger.warning(
+            "Embedding API returned %d vectors for %d inputs; discarding batch",
+            len(data),
+            len(payload),
+        )
+        return [None] * len(texts)
+    vectors = (item.embedding for item in data)
     return [next(vectors) if t is not None else None for t in cleaned]
 
 
