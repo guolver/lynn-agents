@@ -10,11 +10,7 @@ type Message = {
   toolData?: { name: string; result?: Record<string, unknown> };
 };
 
-// Parse a streamed SSE body frame-by-frame. Frames are separated by a blank
-// line; an event's `event:` and `data:` lines are read together within the same
-// frame, and any partial trailing frame is kept in `buffer` until it completes.
-// This keeps large events (e.g. run_matches results) intact when their payload
-// is split across multiple network chunks.
+// Parse a streamed SSE body frame-by-frame.
 async function readSSE(
   body: ReadableStream<Uint8Array>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,6 +48,15 @@ async function readSSE(
   }
 }
 
+const TOOL_LABELS: Record<string, string> = {
+  run_matches: '正在匹配岗位...',
+  parse_resume: '正在解析简历...',
+  search_jobs: '正在搜索岗位...',
+  get_job_detail: '正在加载岗位详情...',
+  update_preferences: '正在更新偏好...',
+  get_my_profile: '正在获取档案...',
+};
+
 export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -59,6 +64,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Load history on mount
   useEffect(() => {
@@ -85,16 +91,15 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  async function handleSend() {
-    const text = input.trim();
-    if (!text || isStreaming) return;
-    setInput('');
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
+    }
+  }, [input]);
 
-    // Add user message
-    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text };
-    setMessages((prev) => [...prev, userMsg]);
-
-    // Start streaming
+  async function streamAssistant(text: string) {
     setIsStreaming(true);
     const assistantId = crypto.randomUUID();
     setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
@@ -118,27 +123,14 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         await readSSE(response.body, (eventType, data) => {
           if (eventType === 'delta') {
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId ? { ...m, content: m.content + data.content } : m,
-              ),
+              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + data.content } : m)),
             );
           } else if (eventType === 'tool_call') {
-            // Show loading indicator
-            const toolLabel =
-              data.name === 'run_matches'
-                ? 'Matching jobs...'
-                : data.name === 'parse_resume'
-                  ? 'Parsing resume...'
-                  : data.name === 'search_jobs'
-                    ? 'Searching...'
-                    : data.name === 'get_job_detail'
-                      ? 'Loading job...'
-                      : 'Processing...';
+            const label = TOOL_LABELS[data.name] || 'Processing...';
             setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content || toolLabel } : m)),
+              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content || label } : m)),
             );
           } else if (eventType === 'tool_result') {
-            // If it's a match result, attach the data
             if (data.name === 'run_matches' && data.result?.matches) {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -157,13 +149,22 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       }
     } catch {
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId ? { ...m, content: 'Network error. Please retry.' } : m,
-        ),
+        prev.map((m) => (m.id === assistantId ? { ...m, content: '网络错误，请重试。' } : m)),
       );
     } finally {
       setIsStreaming(false);
     }
+  }
+
+  async function handleSend() {
+    const text = input.trim();
+    if (!text || isStreaming) return;
+    setInput('');
+
+    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text };
+    setMessages((prev) => [...prev, userMsg]);
+
+    await streamAssistant(text);
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -180,124 +181,108 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         body: formData,
       });
       if (res.ok) {
-        // After upload, send a message to trigger resume parsing
-        setInput('');
         const userMsg: Message = {
           id: crypto.randomUUID(),
           role: 'user',
-          content: `I uploaded my resume: ${file.name}. Please analyze it and find matching jobs for me.`,
+          content: `已上传简历: ${file.name}`,
         };
         setMessages((prev) => [...prev, userMsg]);
-
-        // Trigger LLM to process the resume
-        setIsStreaming(true);
-        const assistantId = crypto.randomUUID();
-        setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
-
-        const response = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            content:
-              'I just uploaded my resume. Please use the parse_resume tool on the resume text from my previous message to extract my profile, then run_matches to find suitable jobs.',
-          }),
-        });
-
-        if (response.ok && response.body) {
-          await readSSE(response.body, (eventType, data) => {
-            if (eventType === 'delta') {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: m.content + data.content } : m,
-                ),
-              );
-            } else if (eventType === 'tool_result' && data.name === 'run_matches') {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        content: '',
-                        toolData: { name: data.name, result: data.result },
-                      }
-                    : m,
-                ),
-              );
-            } else if (eventType === 'error') {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: `Error: ${data.detail}` } : m,
-                ),
-              );
-            }
-          });
-        }
-        setIsStreaming(false);
+        await streamAssistant(
+          'I just uploaded my resume. Please use the parse_resume tool on the resume text from my previous message to extract my profile, then run_matches to find suitable jobs.',
+        );
       } else {
         const data = await res.json();
         alert(data.detail ?? 'Upload failed');
       }
     } catch {
-      alert('Upload failed');
+      alert('上传失败');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
   return (
-    <div className="chat-container">
-      <div className="chat-messages">
-        {messages.length === 0 && (
-          <div className="chat-welcome">
-            <h2>Agent Hub Assistant</h2>
-            <p>Upload your resume or describe your skills to get started.</p>
-          </div>
-        )}
-        {messages.map((msg) => (
-          <ChatMessage
-            key={msg.id}
-            role={msg.role}
-            content={msg.content}
-            toolData={msg.toolData}
-            isStreaming={
-              isStreaming && msg.id === messages[messages.length - 1]?.id && msg.role === 'assistant'
-            }
-          />
-        ))}
-        <div ref={messagesEndRef} />
+    <div className="gpt-chat">
+      {/* Messages */}
+      <div className="gpt-messages">
+        <div className="gpt-messages-inner">
+          {messages.length === 0 && (
+            <div className="gpt-empty">
+              <div className="gpt-empty-logo">AH</div>
+              <p>有什么可以帮你的？</p>
+            </div>
+          )}
+          {messages.map((msg) => (
+            <ChatMessage
+              key={msg.id}
+              role={msg.role}
+              content={msg.content}
+              toolData={msg.toolData}
+              isStreaming={
+                isStreaming && msg.id === messages[messages.length - 1]?.id && msg.role === 'assistant'
+              }
+            />
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
-      <div className="chat-input-area">
-        <input
-          type="file"
-          accept=".pdf"
-          ref={fileInputRef}
-          onChange={handleUpload}
-          style={{ display: 'none' }}
-        />
-        <button
-          className="chat-upload-btn"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isStreaming || isUploading}
-          title="Upload Resume PDF"
-        >
-          {isUploading ? '...' : '\u{1F4CE}'}
-        </button>
-        <input
-          className="chat-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-          placeholder="Type a message..."
-          disabled={isStreaming}
-        />
-        <button
-          className="chat-send-btn"
-          onClick={handleSend}
-          disabled={!input.trim() || isStreaming}
-        >
-          Send
-        </button>
+
+      {/* Input area */}
+      <div className="gpt-input-wrap">
+        <div className="gpt-input-box">
+          <input
+            type="file"
+            accept=".pdf"
+            ref={fileInputRef}
+            onChange={handleUpload}
+            style={{ display: 'none' }}
+          />
+          <button
+            className="gpt-attach-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isStreaming || isUploading}
+            title="上传简历 PDF"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M21.44 11.05l-9.19 9.19a5.64 5.64 0 01-7.98-7.98l9.19-9.19a3.76 3.76 0 015.32 5.32L9.6 17.57a1.88 1.88 0 01-2.66-2.66l8.38-8.38"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <textarea
+            ref={textareaRef}
+            className="gpt-textarea"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="给 Agent Hub 发送消息..."
+            disabled={isStreaming}
+            rows={1}
+          />
+          <button
+            className="gpt-send-btn"
+            onClick={handleSend}
+            disabled={!input.trim() || isStreaming}
+            title="发送"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+        <div className="gpt-disclaimer">Agent Hub 可能会出错。请核实重要信息。</div>
       </div>
     </div>
   );
