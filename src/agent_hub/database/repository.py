@@ -133,6 +133,28 @@ class PostgresRepository:
     def _is_context_session(self) -> bool:
         return _active_session.get() is not None
 
+    def _has_payload(self, model_cls: type) -> bool:
+        """Check if a model class has a JSONB payload column."""
+        return hasattr(model_cls, "payload")
+
+    def _row_to_dict(self, row: Any, kind: str) -> dict[str, Any]:
+        """Convert a model row to a dict, handling both payload and non-payload models."""
+        if hasattr(row, "payload"):
+            return dict(row.payload)
+        # For models without payload, build dict from typed columns + common fields
+        result: dict[str, Any] = {"id": row.id}
+        typed_fn = _TYPED_COLUMNS.get(kind)
+        if typed_fn:
+            # Get the column names from the typed columns spec
+            sample = typed_fn({})
+            for col in sample:
+                result[col] = getattr(row, col, None)
+        if hasattr(row, "created_at"):
+            result["created_at"] = row.created_at.isoformat() if row.created_at else ""
+        if hasattr(row, "updated_at"):
+            result["updated_at"] = row.updated_at.isoformat() if row.updated_at else ""
+        return result
+
     def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]:
         model_cls = _KIND_MAP.get(kind)
         if model_cls is None:
@@ -144,6 +166,7 @@ class PostgresRepository:
 
         typed = _TYPED_COLUMNS[kind](item)
         natural = _NATURAL_KEYS.get(kind)
+        has_payload = self._has_payload(model_cls)
         session = self._session()
         owns_session = not self._is_context_session()
 
@@ -157,17 +180,21 @@ class PostgresRepository:
                     ).scalar_one_or_none()
                     if existing is not None and existing.id != item["id"]:
                         # Return the already-persisted record.
-                        return dict(existing.payload)
+                        return self._row_to_dict(existing, kind)
 
             row = session.get(model_cls, item["id"])
             if row is not None:
-                row.payload = item
+                if has_payload:
+                    row.payload = item
                 for col, val in typed.items():
                     setattr(row, col, val)
                 if hasattr(row, "updated_at"):
                     row.updated_at = datetime.now(timezone.utc)
             else:
-                row = model_cls(id=item["id"], payload=item, **typed)
+                if has_payload:
+                    row = model_cls(id=item["id"], payload=item, **typed)
+                else:
+                    row = model_cls(id=item["id"], **typed)
                 session.add(row)
 
             if owns_session:
@@ -175,7 +202,7 @@ class PostgresRepository:
             else:
                 session.flush()
 
-            return dict(row.payload)
+            return self._row_to_dict(row, kind)
         except Exception:
             if owns_session:
                 session.rollback()
@@ -193,7 +220,7 @@ class PostgresRepository:
         owns_session = not self._is_context_session()
         try:
             row = session.get(model_cls, entity_id)
-            return dict(row.payload) if row else None
+            return self._row_to_dict(row, kind) if row else None
         finally:
             if owns_session:
                 session.close()
@@ -211,7 +238,7 @@ class PostgresRepository:
                 .scalars()
                 .all()
             )
-            return [dict(row.payload) for row in rows]
+            return [self._row_to_dict(row, kind) for row in rows]
         finally:
             if owns_session:
                 session.close()
