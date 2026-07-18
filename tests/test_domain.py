@@ -7,6 +7,7 @@ from agent_hub.agents.global_part_time.domain import (
     score_match,
     timezone_matches,
 )
+from tests.factories import candidate_payload, job_payload
 
 
 class DomainRulesTest(unittest.TestCase):
@@ -167,6 +168,27 @@ class SkillScoreExpansionTest(unittest.TestCase):
         score, breakdown, reasons = score_match(candidate, job, expand_fn=mock_expand)
         has_expansion_reason = any("扩展" in r or "相关" in r for r in reasons)
         self.assertTrue(has_expansion_reason, f"Expected expansion reason in {reasons}")
+
+
+class PrecomputedSemanticScoreTest(unittest.TestCase):
+    def test_precomputed_similarity_maps_to_semantic_score(self):
+        candidate = candidate_payload()
+        job = job_payload()
+        # (0.9 - 0.3) / 0.6 = 1.0
+        _total, breakdown, _reasons = score_match(candidate, job, semantic_similarity=0.9)
+        self.assertEqual(breakdown["semantic"], 1.0)
+
+    def test_precomputed_similarity_clamps_low_values(self):
+        candidate = candidate_payload()
+        job = job_payload()
+        _total, breakdown, _reasons = score_match(candidate, job, semantic_similarity=0.1)
+        self.assertEqual(breakdown["semantic"], 0.0)
+
+    def test_without_precomputed_and_without_embed_fn_stays_neutral(self):
+        candidate = candidate_payload()
+        job = job_payload()
+        _total, breakdown, _reasons = score_match(candidate, job)
+        self.assertEqual(breakdown["semantic"], 0.5)
 
 
 if __name__ == "__main__":

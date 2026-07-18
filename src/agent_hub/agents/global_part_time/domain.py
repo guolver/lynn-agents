@@ -214,18 +214,23 @@ def _semantic_score(
     candidate: dict[str, Any],
     job: dict[str, Any],
     embed_fn: Callable[[str], list[float] | None] | None = None,
+    precomputed: float | None = None,
 ) -> float:
-    """通过 embedding 余弦相似度计算候选人与职位的语义匹配度。"""
-    if embed_fn is None:
-        return 0.5
-    from .embedding import build_candidate_text, build_job_text, cosine_similarity
+    """通过 embedding 余弦相似度计算候选人与职位的语义匹配度。
 
-    cand_emb = embed_fn(build_candidate_text(candidate))
-    job_emb = embed_fn(build_job_text(job))
-    if cand_emb is None or job_emb is None:
-        return 0.5
-    sim = cosine_similarity(cand_emb, job_emb)
-    return max(0.0, min(1.0, (sim - 0.3) / 0.6))  # 线性映射 [0.3, 0.9] → [0, 1]
+    ``precomputed`` 为向量召回阶段带回的相似度；提供时跳过实时 embedding 调用。
+    """
+    if precomputed is None:
+        if embed_fn is None:
+            return 0.5
+        from .embedding import build_candidate_text, build_job_text, cosine_similarity
+
+        cand_emb = embed_fn(build_candidate_text(candidate))
+        job_emb = embed_fn(build_job_text(job))
+        if cand_emb is None or job_emb is None:
+            return 0.5
+        precomputed = cosine_similarity(cand_emb, job_emb)
+    return max(0.0, min(1.0, (precomputed - 0.3) / 0.6))  # 线性映射 [0.3, 0.9] → [0, 1]
 
 
 def _skill_score(
@@ -261,10 +266,11 @@ def score_match(
     job: dict[str, Any],
     expand_fn: Callable[[list[str]], set[str]] | None = None,
     embed_fn: Callable[[str], list[float] | None] | None = None,
+    semantic_similarity: float | None = None,
 ) -> tuple[float, dict[str, float], list[str]]:
     """按照版本化权重生成可复现总分、分项分数和面向用户的理由。"""
     skill, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
-    semantic = _semantic_score(candidate, job, embed_fn)
+    semantic = _semantic_score(candidate, job, embed_fn, precomputed=semantic_similarity)
     required_langs = set(job.get("languages") or [])
     owned_langs = {
         x["code"] if isinstance(x, dict) else x for x in candidate.get("languages") or []
