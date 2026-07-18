@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 
-from . import _SSL_CONTEXT, strip_html
+from . import _SSL_CONTEXT, normalize_countries, strip_html
 
 # Re-export so existing imports (tests, etc.) keep working.
 __all__ = ["strip_html", "map_job", "fetch"]
@@ -26,7 +26,7 @@ def map_job(raw: dict) -> dict:
     if not location or location.lower() in ("worldwide", "global"):
         countries_allowed = ["GLOBAL"]
     else:
-        countries_allowed = [location]
+        countries_allowed = normalize_countries([location])
 
     epoch = raw.get("epoch")
     published_at = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat() if epoch else None

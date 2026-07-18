@@ -10,6 +10,48 @@ type Message = {
   toolData?: { name: string; result?: Record<string, unknown> };
 };
 
+// Parse a streamed SSE body frame-by-frame. Frames are separated by a blank
+// line; an event's `event:` and `data:` lines are read together within the same
+// frame, and any partial trailing frame is kept in `buffer` until it completes.
+// This keeps large events (e.g. run_matches results) intact when their payload
+// is split across multiple network chunks.
+async function readSSE(
+  body: ReadableStream<Uint8Array>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onEvent: (event: string, data: any) => void,
+) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+
+      let eventType = '';
+      let dataStr = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+        else if (line.startsWith('data: ')) dataStr += line.slice(6);
+      }
+      if (!dataStr) continue;
+
+      try {
+        onEvent(eventType, JSON.parse(dataStr));
+      } catch {
+        // ignore malformed frame
+      }
+    }
+  }
+}
+
 export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -72,77 +114,46 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         return;
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          let eventType = '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ')) {
-              const dataStr = line.slice(6);
-              try {
-                const data = JSON.parse(dataStr);
-
-                if (eventType === 'delta') {
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId ? { ...m, content: m.content + data.content } : m,
-                    ),
-                  );
-                } else if (eventType === 'tool_call') {
-                  // Show loading indicator
-                  const toolLabel =
-                    data.name === 'run_matches'
-                      ? 'Matching jobs...'
-                      : data.name === 'parse_resume'
-                        ? 'Parsing resume...'
-                        : data.name === 'search_jobs'
-                          ? 'Searching...'
-                          : data.name === 'get_job_detail'
-                            ? 'Loading job...'
-                            : 'Processing...';
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId ? { ...m, content: m.content || toolLabel } : m,
-                    ),
-                  );
-                } else if (eventType === 'tool_result') {
-                  // If it's a match result, attach the data
-                  if (data.name === 'run_matches' && data.result?.matches) {
-                    setMessages((prev) =>
-                      prev.map((m) =>
-                        m.id === assistantId
-                          ? { ...m, content: '', toolData: { name: data.name, result: data.result } }
-                          : m,
-                      ),
-                    );
-                  }
-                } else if (eventType === 'done') {
-                  // Complete
-                } else if (eventType === 'error') {
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId ? { ...m, content: `Error: ${data.detail}` } : m,
-                    ),
-                  );
-                }
-              } catch {
-                // ignore parse errors
-              }
+      if (response.body) {
+        await readSSE(response.body, (eventType, data) => {
+          if (eventType === 'delta') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: m.content + data.content } : m,
+              ),
+            );
+          } else if (eventType === 'tool_call') {
+            // Show loading indicator
+            const toolLabel =
+              data.name === 'run_matches'
+                ? 'Matching jobs...'
+                : data.name === 'parse_resume'
+                  ? 'Parsing resume...'
+                  : data.name === 'search_jobs'
+                    ? 'Searching...'
+                    : data.name === 'get_job_detail'
+                      ? 'Loading job...'
+                      : 'Processing...';
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content || toolLabel } : m)),
+            );
+          } else if (eventType === 'tool_result') {
+            // If it's a match result, attach the data
+            if (data.name === 'run_matches' && data.result?.matches) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, content: '', toolData: { name: data.name, result: data.result } }
+                    : m,
+                ),
+              );
             }
+          } else if (eventType === 'error') {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: `Error: ${data.detail}` } : m)),
+            );
           }
-        }
+        });
       }
     } catch {
       setMessages((prev) =>
@@ -193,48 +204,33 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         });
 
         if (response.ok && response.body) {
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            let eventType = '';
-            for (const line of lines) {
-              if (line.startsWith('event: ')) {
-                eventType = line.slice(7).trim();
-              } else if (line.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  if (eventType === 'delta') {
-                    setMessages((prev) =>
-                      prev.map((m) =>
-                        m.id === assistantId ? { ...m, content: m.content + data.content } : m,
-                      ),
-                    );
-                  } else if (eventType === 'tool_result' && data.name === 'run_matches') {
-                    setMessages((prev) =>
-                      prev.map((m) =>
-                        m.id === assistantId
-                          ? {
-                              ...m,
-                              content: '',
-                              toolData: { name: data.name, result: data.result },
-                            }
-                          : m,
-                      ),
-                    );
-                  }
-                } catch {}
-              }
+          await readSSE(response.body, (eventType, data) => {
+            if (eventType === 'delta') {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: m.content + data.content } : m,
+                ),
+              );
+            } else if (eventType === 'tool_result' && data.name === 'run_matches') {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? {
+                        ...m,
+                        content: '',
+                        toolData: { name: data.name, result: data.result },
+                      }
+                    : m,
+                ),
+              );
+            } else if (eventType === 'error') {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: `Error: ${data.detail}` } : m,
+                ),
+              );
             }
-          }
+          });
         }
         setIsStreaming(false);
       } else {

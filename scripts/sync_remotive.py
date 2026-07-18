@@ -13,8 +13,8 @@ import argparse
 import sys
 
 from agent_hub.agents.global_part_time.fetchers.remotive import fetch, map_job
-from agent_hub.agents.global_part_time.repository import Repository
 from agent_hub.agents.global_part_time.service import AgentService
+from agent_hub.database.config import create_repository
 
 
 REMOTIVE_SOURCE = {
@@ -36,10 +36,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--category", help="Filter by category (e.g. software-dev)")
     parser.add_argument("--search", help="Search query (e.g. python)")
     parser.add_argument("--limit", type=int, default=200, help="Max jobs to fetch")
-    parser.add_argument("--db", default=None, help="Database path (default: ./data/agent.db)")
     args = parser.parse_args(argv)
 
-    repo = Repository(args.db)
+    repo = create_repository()
     service = AgentService(repo)
 
     # Find or create the Remotive source

@@ -6,7 +6,7 @@ import json
 import re
 from urllib.request import Request, urlopen
 
-from . import _SSL_CONTEXT, strip_html
+from . import _SSL_CONTEXT, normalize_countries, strip_html
 
 API_URL = "https://remotive.com/api/remote-jobs"
 USER_AGENT = "AgentHub/0.2 (+https://github.com/agent-hub)"
@@ -60,7 +60,9 @@ def map_job(raw: dict) -> dict:
     if not location or location.lower() in ("worldwide", "anywhere"):
         countries_allowed = ["GLOBAL"]
     else:
-        countries_allowed = [loc.strip() for loc in location.split(",") if loc.strip()]
+        countries_allowed = normalize_countries(
+            [loc.strip() for loc in location.split(",") if loc.strip()]
+        )
 
     tags = raw.get("tags") or []
     category = raw.get("category") or ""

@@ -1,7 +1,8 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import { PageHeader } from "../../../../components/page-header";
-import { getJob } from "../../../../lib/agent-hub";
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { JobReviewPanel } from '../../../../components/job-review-panel';
+import { PageHeader } from '../../../../components/page-header';
+import { getJob } from '../../../../lib/agent-hub';
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -10,17 +11,19 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   const salary =
     job.compensation_min != null || job.compensation_max != null
-      ? `${job.compensation_min ?? "?"}–${job.compensation_max ?? "?"} ${job.compensation_currency ?? ""} / ${job.compensation_period ?? "hour"}`
+      ? `${job.compensation_min ?? '?'}–${job.compensation_max ?? '?'} ${job.compensation_currency ?? ''} / ${job.compensation_period ?? 'hour'}`
       : null;
 
   return (
     <>
       <PageHeader
-        eyebrow={`${job.company_name} · ${job.work_mode} · ${job.employment_type ?? "part_time"}`}
+        eyebrow={`${job.company_name} · ${job.work_mode} · ${job.employment_type ?? 'part_time'}`}
         title={job.title_zh ?? job.title_original}
-        description={job.title_zh ? `${job.title_original}${salary ? ` · ${salary}` : ""}` : (salary ?? "")}
+        description={job.title_zh ? `${job.title_original}${salary ? ` · ${salary}` : ''}` : (salary ?? '')}
         action={
-          <span className={`status-badge ${job.status === "active" ? "active" : job.status === "rejected" ? "rejected" : "pending"}`}>
+          <span
+            className={`status-badge ${job.status === 'active' ? 'active' : job.status === 'rejected' ? 'rejected' : 'pending'}`}
+          >
             {job.status}
           </span>
         }
@@ -43,19 +46,19 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               <dd>{Math.round(job.quality_score * 100)}%</dd>
 
               <dt>可工作地区</dt>
-              <dd>{job.countries_allowed.join(", ") || "未指定"}</dd>
+              <dd>{job.countries_allowed.join(', ') || '未指定'}</dd>
 
               {job.timezone_requirements && job.timezone_requirements.length > 0 && (
                 <>
                   <dt>时区要求</dt>
-                  <dd>{job.timezone_requirements.join(", ")}</dd>
+                  <dd>{job.timezone_requirements.join(', ')}</dd>
                 </>
               )}
 
               {job.languages && job.languages.length > 0 && (
                 <>
                   <dt>语言要求</dt>
-                  <dd>{job.languages.join(", ")}</dd>
+                  <dd>{job.languages.join(', ')}</dd>
                 </>
               )}
 
@@ -63,7 +66,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                 <>
                   <dt>每周工时</dt>
                   <dd>
-                    {job.hours_per_week_min ?? "?"}–{job.hours_per_week_max ?? "?"} 小时
+                    {job.hours_per_week_min ?? '?'}–{job.hours_per_week_max ?? '?'} 小时
                   </dd>
                 </>
               )}
@@ -71,7 +74,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               {job.published_at && (
                 <>
                   <dt>发布日期</dt>
-                  <dd>{new Date(job.published_at).toLocaleDateString("zh-CN")}</dd>
+                  <dd>{new Date(job.published_at).toLocaleDateString('zh-CN')}</dd>
                 </>
               )}
 
@@ -133,17 +136,64 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             {(job.description_zh || job.description_original) && (
               <div className="job-detail-section">
                 <h3 className="job-detail-heading">职位描述</h3>
-                <div className="job-description">
-                  {job.description_zh || job.description_original}
-                </div>
+                <div className="job-description">{job.description_zh || job.description_original}</div>
               </div>
             )}
           </div>
+
+          {job.risk_signals && job.risk_signals.length > 0 && (
+            <div className="panel-body" style={{ borderTop: '1px solid var(--line)' }}>
+              <h3 className="job-detail-heading">风险信号</h3>
+              <div className="risk-signal-list">
+                {job.risk_signals.map((signal) => (
+                  <span className="risk-signal-tag" key={signal}>
+                    {signal}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {job.review_status && job.review_status !== 'pending' && job.review_status !== 'not_required' && (
+            <div className="panel-body" style={{ borderTop: '1px solid var(--line)' }}>
+              <h3 className="job-detail-heading">审核记录</h3>
+              <dl className="detail-grid" style={{ marginTop: 12 }}>
+                <dt>审核结果</dt>
+                <dd>
+                  <span className={`status-badge ${job.review_status === 'approved' ? 'approved' : 'rejected'}`}>
+                    {job.review_status === 'approved' ? '已通过' : '已拒绝'}
+                  </span>
+                </dd>
+                {job.reviewed_by && (
+                  <>
+                    <dt>审核人</dt>
+                    <dd>{job.reviewed_by}</dd>
+                  </>
+                )}
+                {job.reviewed_at && (
+                  <>
+                    <dt>审核时间</dt>
+                    <dd>{new Date(job.reviewed_at).toLocaleString('zh-CN')}</dd>
+                  </>
+                )}
+                {job.review_note && (
+                  <>
+                    <dt>审核备注</dt>
+                    <dd>{job.review_note}</dd>
+                  </>
+                )}
+              </dl>
+            </div>
+          )}
+
+          <JobReviewPanel jobId={job.id} reviewStatus={job.review_status ?? 'not_required'} />
         </section>
       </div>
 
       <div className="job-detail-footer">
-        <Link className="detail-link" href="/jobs">← 返回职位列表</Link>
+        <Link className="detail-link" href="/jobs">
+          ← 返回职位列表
+        </Link>
       </div>
     </>
   );

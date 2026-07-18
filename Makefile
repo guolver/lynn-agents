@@ -1,4 +1,4 @@
-.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg test-worker worker format clean infra infra-up infra-down migrate
+.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg test-worker worker format clean infra infra-up infra-down migrate up down logs
 
 # — 初始化 ————————————————————————————————————
 
@@ -49,11 +49,22 @@ worker: ## 启动 Celery worker
 	. .venv/bin/activate && celery -A agent_hub.worker.celery_app:celery_app worker \
 		--loglevel=info --concurrency=2
 
+# — Docker 全栈 ————————————————————————————————————
+
+up: ## 全栈启动（前后端 + 基础设施）
+	docker compose -f compose.dev.yaml up -d --build --wait
+
+down: ## 全栈停止
+	docker compose -f compose.dev.yaml down
+
+logs: ## 查看全栈日志
+	docker compose -f compose.dev.yaml logs -f
+
 # — 基础设施 ————————————————————————————————————
 
 infra-up: infra ## 启动本地 PostgreSQL 和 Redis
-infra: ## 启动本地 PostgreSQL 和 Redis
-	docker compose -f compose.dev.yaml up -d --wait
+infra: ## 启动本地 PostgreSQL、Redis 和 Neo4j
+	docker compose -f compose.dev.yaml up -d --wait postgres redis neo4j
 
 infra-down: ## 停止基础设施（保留数据卷）
 	docker compose -f compose.dev.yaml down

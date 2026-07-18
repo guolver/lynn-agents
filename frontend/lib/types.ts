@@ -57,6 +57,11 @@ export type Job = {
   published_at?: string | null;
   source_id?: string;
   created_at?: string;
+  review_status?: 'pending' | 'approved' | 'rejected' | 'not_required';
+  reviewed_by?: string;
+  reviewed_at?: string;
+  review_note?: string;
+  risk_signals?: string[];
 };
 
 export type SkillGraphNode = {
@@ -73,6 +78,101 @@ export type SkillGraphLink = {
 export type SkillGraphData = {
   nodes: SkillGraphNode[];
   links: SkillGraphLink[];
+};
+
+export type Language = {
+  code: string;
+  level: string;
+};
+
+export type Skill = {
+  name: string;
+  level: number;
+};
+
+export type Money = {
+  amount: number;
+  currency: string;
+};
+
+export type Candidate = {
+  id: string;
+  country: string;
+  timezone: string;
+  email?: string | null;
+  languages: Language[];
+  skills: Skill[];
+  desired_roles: string[];
+  minimum_hourly_rate?: Money | null;
+  availability_hours_per_week: number;
+  allowed_work_modes: string[];
+  notification_channels: string[];
+  notification_frequency: 'daily' | 'weekly' | 'paused';
+  excluded_companies: string[];
+  consent_status: 'opted_in' | 'opted_out' | 'not_requested';
+  created_at?: string;
+};
+
+export type MatchResult = {
+  id: string;
+  candidate_id: string;
+  job_id: string;
+  job_title: string;
+  company_name: string;
+  total_score: number;
+  dimension_scores: {
+    skills: number;
+    semantic: number;
+    language: number;
+    location: number;
+    compensation: number;
+    availability: number;
+    preference: number;
+    freshness: number;
+  };
+  reasons: string[];
+  feedback?: string | null;
+  created_at?: string;
+};
+
+export type NotificationEntry = {
+  job_id: string;
+  job_title: string;
+  company_name: string;
+  score: number;
+  reasons: string[];
+};
+
+export type Notification = {
+  id: string;
+  candidate_id: string;
+  status: 'pending_approval' | 'approved' | 'rejected' | 'sent';
+  entries: NotificationEntry[];
+  approved_by?: string | null;
+  approved_at?: string | null;
+  sent_at?: string | null;
+  created_at?: string;
+};
+
+export type WorkflowStep = {
+  step_name: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  retry_count: number;
+  error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+};
+
+export type WorkflowRun = {
+  id: string;
+  workflow_type: 'source_sync' | 'matching' | 'notification' | 'notification_send';
+  target_id: string;
+  status: 'running' | 'completed' | 'failed' | 'manual_review';
+  actor: string;
+  celery_task_id?: string | null;
+  steps: WorkflowStep[];
+  created_at?: string;
+  completed_at?: string | null;
 };
 
 export type AuditEvent = {

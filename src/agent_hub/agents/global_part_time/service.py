@@ -40,9 +40,11 @@ class AgentService:
         self,
         repository: RepositoryProtocol,
         expand_fn: Callable[[list[str]], set[str]] | None = None,
+        embed_fn: Callable[[str], list[float] | None] | None = None,
     ):
         self.repo = repository
         self.expand_fn = expand_fn
+        self.embed_fn = embed_fn
 
     @staticmethod
     def _id() -> str:
@@ -235,7 +237,25 @@ class AgentService:
                 )
                 return set()
 
+        embedding_failed = False
+
+        def safe_embed(text: str) -> list[float] | None:
+            nonlocal embedding_failed
+            if self.embed_fn is None or embedding_failed:
+                return None
+            try:
+                return self.embed_fn(text)
+            except Exception as exc:
+                embedding_failed = True
+                logger.warning(
+                    "Embedding call failed; using neutral semantic score: %s",
+                    exc,
+                    exc_info=True,
+                )
+                return None
+
         expand_fn = expand_skills if self.expand_fn is not None else None
+        embed_fn = safe_embed if self.embed_fn is not None else None
         existing_matches = {
             item["job_id"]: item
             for item in self.repo.list("match")
@@ -259,11 +279,13 @@ class AgentService:
 
         scored_jobs = []
         for job in eligible_jobs:
-            scored_jobs.append((job, *score_match(candidate, job, expand_fn)))
+            scored_jobs.append((job, *score_match(candidate, job, expand_fn, embed_fn)))
             if expansion_failed:
                 break
         if expansion_failed:
-            scored_jobs = [(job, *score_match(candidate, job)) for job in eligible_jobs]
+            scored_jobs = [
+                (job, *score_match(candidate, job, embed_fn=embed_fn)) for job in eligible_jobs
+            ]
 
         results = []
         for job, score, breakdown, reasons in scored_jobs:
@@ -296,6 +318,14 @@ class AgentService:
         self._required("candidate", candidate_id)
         items = [x for x in self.repo.list("match") if x["candidate_id"] == candidate_id]
         items.sort(key=lambda x: x["score"], reverse=True)
+
+        # Enrich with job details for display
+        jobs_by_id = {j["id"]: j for j in self.repo.list("job")}
+        for item in items:
+            job = jobs_by_id.get(item.get("job_id"))
+            if job:
+                item["job_title"] = job.get("title_original", "")
+                item["company_name"] = job.get("company_name", "")
         return items
 
     def feedback(self, match_id: str, value: str, actor: str) -> dict[str, Any]:

@@ -12,8 +12,8 @@ import argparse
 import sys
 
 from agent_hub.agents.global_part_time.fetchers.remoteok import fetch, map_job
-from agent_hub.agents.global_part_time.repository import Repository
 from agent_hub.agents.global_part_time.service import AgentService
+from agent_hub.database.config import create_repository
 
 
 REMOTEOK_SOURCE = {
@@ -34,10 +34,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Sync RemoteOK jobs into the store")
     parser.add_argument("--tags", nargs="*", help="Filter by tags (e.g. python react)")
     parser.add_argument("--limit", type=int, default=200, help="Max jobs to fetch")
-    parser.add_argument("--db", default=None, help="Database path (default: ./data/agent.db)")
     args = parser.parse_args(argv)
 
-    repo = Repository(args.db)
+    repo = create_repository()
     service = AgentService(repo)
 
     # Find or create the RemoteOK source

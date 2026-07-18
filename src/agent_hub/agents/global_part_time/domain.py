@@ -15,14 +15,16 @@ from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-RULE_VERSION = "2026-07-15.1"
+RULE_VERSION = "2026-07-18.1"
 SCORE_WEIGHTS = {
-    "skills": 0.35,
-    "language": 0.15,
-    "location_timezone": 0.15,
-    "compensation": 0.15,
-    "preference": 0.10,
-    "freshness_quality": 0.10,
+    "skills": 0.28,
+    "semantic": 0.12,
+    "language": 0.13,
+    "location_timezone": 0.13,
+    "compensation": 0.13,
+    "availability": 0.08,
+    "preference": 0.07,
+    "freshness_quality": 0.06,
 }
 
 HIGH_RISK_TERMS = {
@@ -185,6 +187,47 @@ def hard_filter(
     return failures
 
 
+def _availability_score(candidate: dict[str, Any], job: dict[str, Any]) -> float:
+    """候选人工时可用性与职位需求的梯度匹配。"""
+    avail = candidate.get("availability_hours_per_week", 0)
+    job_min = job.get("hours_per_week_min")
+    job_max = job.get("hours_per_week_max")
+
+    if job_min is None and job_max is None:
+        return 0.7  # 无要求 → 中性
+
+    if job_max is None:
+        job_max = int(job_min * 1.5) if job_min else 40
+    if job_min is None:
+        job_min = 0
+
+    if avail >= job_max:
+        return 1.0
+    elif avail >= job_min:
+        span = job_max - job_min
+        return 1.0 if span == 0 else 0.7 + 0.3 * (avail - job_min) / span
+    else:
+        return max(0.3 * avail / max(job_min, 1), 0.0)
+
+
+def _semantic_score(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    embed_fn: Callable[[str], list[float] | None] | None = None,
+) -> float:
+    """通过 embedding 余弦相似度计算候选人与职位的语义匹配度。"""
+    if embed_fn is None:
+        return 0.5
+    from .embedding import build_candidate_text, build_job_text, cosine_similarity
+
+    cand_emb = embed_fn(build_candidate_text(candidate))
+    job_emb = embed_fn(build_job_text(job))
+    if cand_emb is None or job_emb is None:
+        return 0.5
+    sim = cosine_similarity(cand_emb, job_emb)
+    return max(0.0, min(1.0, (sim - 0.3) / 0.6))  # 线性映射 [0.3, 0.9] → [0, 1]
+
+
 def _skill_score(
     candidate: dict[str, Any],
     job: dict[str, Any],
@@ -217,9 +260,11 @@ def score_match(
     candidate: dict[str, Any],
     job: dict[str, Any],
     expand_fn: Callable[[list[str]], set[str]] | None = None,
+    embed_fn: Callable[[str], list[float] | None] | None = None,
 ) -> tuple[float, dict[str, float], list[str]]:
     """按照版本化权重生成可复现总分、分项分数和面向用户的理由。"""
     skill, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
+    semantic = _semantic_score(candidate, job, embed_fn)
     required_langs = set(job.get("languages") or [])
     owned_langs = {
         x["code"] if isinstance(x, dict) else x for x in candidate.get("languages") or []
@@ -242,6 +287,7 @@ def score_match(
         if maximum is None or minimum is None
         else min(float(maximum) / max(float(minimum), 1), 1.0)
     )
+    availability = _availability_score(candidate, job)
     desired = set(candidate.get("desired_roles") or [])
     categories = set(job.get("categories") or [])
     preference = 1.0 if not desired or desired & categories else 0.4
@@ -249,9 +295,11 @@ def score_match(
     freshness_quality = min(max(quality, 0.0), 1.0)
     breakdown = {
         "skills": round(skill, 4),
+        "semantic": round(semantic, 4),
         "language": round(language, 4),
         "location_timezone": round(location_timezone, 4),
         "compensation": round(compensation, 4),
+        "availability": round(availability, 4),
         "preference": round(preference, 4),
         "freshness_quality": round(freshness_quality, 4),
     }
@@ -263,10 +311,14 @@ def score_match(
         reasons.append(f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关")
     if not direct_skills and not indirect_skills and skill >= 0.5:
         reasons.append("技能与职位要求高度匹配")
+    if semantic >= 0.7:
+        reasons.append("简历与职位描述语义高度相似")
     if location_timezone >= 0.7:
         reasons.append("地区与工作时区满足要求")
     if compensation >= 1:
         reasons.append("薪资达到最低期望")
+    if availability >= 0.8:
+        reasons.append("可用工时充分满足职位需求")
     if preference >= 1:
         reasons.append("职位类别符合你的偏好")
     return total, breakdown, reasons or ["该职位通过了你的全部硬性条件"]

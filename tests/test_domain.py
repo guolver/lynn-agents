@@ -50,8 +50,11 @@ class DomainRulesTest(unittest.TestCase):
     def test_hard_filter_and_weighted_score(self):
         self.assertEqual(hard_filter(self.candidate, self.job), [])
         score, breakdown, reasons = score_match(self.candidate, self.job)
-        self.assertGreaterEqual(score, 0.95)
+        # Without embed_fn, semantic defaults to 0.5 (neutral); total ~0.93 for a perfect match
+        self.assertGreaterEqual(score, 0.93)
         self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(breakdown["semantic"], 0.5)
+        self.assertEqual(breakdown["availability"], 1.0)
         self.assertIn("薪资达到最低期望", reasons)
 
     def test_hard_filters_are_deterministic(self):

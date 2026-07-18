@@ -1,11 +1,13 @@
 const path = require('path');
 
+const ruff = path.join(__dirname, '.venv', 'bin', 'ruff');
+
 module.exports = {
   // Python: ruff lint + format
   '*.py': (files) => {
     const cmds = [
-      `ruff check --fix ${files.join(' ')}`,
-      `ruff format ${files.join(' ')}`,
+      `${ruff} check --fix ${files.join(' ')}`,
+      `${ruff} format ${files.join(' ')}`,
     ];
     return cmds;
   },
