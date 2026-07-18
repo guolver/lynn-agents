@@ -13,7 +13,7 @@ COPY src/ ./src/
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 
-RUN pip install --no-cache-dir -e ".[dev]"
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -e ".[dev]"
 
 RUN mkdir -p /app/data
 
