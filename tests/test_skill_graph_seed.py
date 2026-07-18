@@ -9,15 +9,15 @@ class SkillGraphSeedValidationTest(unittest.TestCase):
 
     def test_rejects_unknown_endpoint(self):
         with self.assertRaisesRegex(ValueError, "unknown relation endpoint: Missing"):
-            validate_seed(SKILL_GRAPH_SEED, [
-                {"from": "React", "type": "RELATED_TO", "to": "Missing"}
-            ])
+            validate_seed(
+                SKILL_GRAPH_SEED, [{"from": "React", "type": "RELATED_TO", "to": "Missing"}]
+            )
 
     def test_rejects_self_relation(self):
         with self.assertRaisesRegex(ValueError, "self relation: React"):
-            validate_seed(SKILL_GRAPH_SEED, [
-                {"from": "React", "type": "RELATED_TO", "to": "React"}
-            ])
+            validate_seed(
+                SKILL_GRAPH_SEED, [{"from": "React", "type": "RELATED_TO", "to": "React"}]
+            )
 
     def test_rejects_duplicate_relation(self):
         relation = {"from": "React", "type": "RELATED_TO", "to": "Vue"}

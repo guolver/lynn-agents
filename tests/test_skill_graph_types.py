@@ -37,7 +37,11 @@ class ExpansionTypesTest(unittest.TestCase):
         )
 
     def test_result_orders_evidence_deterministically(self):
-        later = ExpansionEvidence("React", "React", "Vue", "skill", ("RELATED_TO",), ("React", "Vue"), 1, 0.4)
-        earlier = ExpansionEvidence("React", "React", "Angular", "skill", ("RELATED_TO",), ("React", "Angular"), 1, 0.4)
+        later = ExpansionEvidence(
+            "React", "React", "Vue", "skill", ("RELATED_TO",), ("React", "Vue"), 1, 0.4
+        )
+        earlier = ExpansionEvidence(
+            "React", "React", "Angular", "skill", ("RELATED_TO",), ("React", "Angular"), 1, 0.4
+        )
         result = ExpansionResult.from_iterable([later, earlier])
         self.assertEqual([item.target for item in result.evidence], ["Angular", "Vue"])
