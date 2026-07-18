@@ -418,3 +418,72 @@ class PostgresRepository:
             raise
         finally:
             session.close()
+
+    # ------------------------------------------------------------------
+    # Vector search (pgvector)
+    # ------------------------------------------------------------------
+
+    def search_jobs_by_embedding(
+        self, vec: list[float], limit: int = 200
+    ) -> list[tuple[dict[str, Any], float]]:
+        """按余弦相似度检索活跃且已向量化的职位，返回 (job_dict, similarity) 降序列表。"""
+        session = self._session()
+        owns_session = not self._is_context_session()
+        try:
+            distance = Job.embedding.cosine_distance(vec)
+            rows = session.execute(
+                select(Job, distance.label("distance"))
+                .where(Job.status == "active", Job.embedding.isnot(None))
+                .order_by(distance)
+                .limit(limit)
+            ).all()
+            return [(self._row_to_dict(row.Job, "job"), 1.0 - float(row.distance)) for row in rows]
+        finally:
+            if owns_session:
+                session.close()
+
+    def update_job_embeddings(self, embeddings: dict[str, list[float]]) -> int:
+        """批量写入职位向量，返回实际更新条数。"""
+        session = self._session()
+        owns_session = not self._is_context_session()
+        updated = 0
+        try:
+            for job_id, vec in embeddings.items():
+                if vec is None:
+                    continue
+                row = session.get(Job, job_id)
+                if row is not None:
+                    row.embedding = vec
+                    updated += 1
+            if owns_session:
+                session.commit()
+            else:
+                session.flush()
+            return updated
+        except Exception:
+            if owns_session:
+                session.rollback()
+            raise
+        finally:
+            if owns_session:
+                session.close()
+
+    def list_jobs_missing_embedding(self, limit: int = 500) -> list[str]:
+        """返回缺失向量的活跃职位 id（新职位优先）。"""
+        session = self._session()
+        owns_session = not self._is_context_session()
+        try:
+            rows = (
+                session.execute(
+                    select(Job.id)
+                    .where(Job.status == "active", Job.embedding.is_(None))
+                    .order_by(Job.created_at.desc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return list(rows)
+        finally:
+            if owns_session:
+                session.close()

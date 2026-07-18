@@ -51,5 +51,69 @@ class PostgresRepositoryContractTest(unittest.TestCase):
     )
 
 
+@unittest.skipUnless(TEST_DATABASE_URL, "TEST_DATABASE_URL not set")
+class PostgresVectorSearchTest(unittest.TestCase):
+    def setUp(self) -> None:
+        from agent_hub.database.models import Base
+        from agent_hub.database.repository import PostgresRepository
+
+        from tests.factories import ensure_vector_extension
+
+        self.repo = PostgresRepository(TEST_DATABASE_URL)
+        ensure_vector_extension(self.repo._engine)
+        Base.metadata.drop_all(self.repo._engine)
+        Base.metadata.create_all(self.repo._engine)
+
+    @staticmethod
+    def _job(job_id: str, title: str) -> dict:
+        return {
+            "id": job_id,
+            "source_id": "s1",
+            "dedup_key": job_id,
+            "title_original": title,
+            "company_name": "ACME",
+            "status": "active",
+        }
+
+    def test_search_orders_by_cosine_similarity(self):
+        self.repo.put("job", self._job("job-a", "Python Backend"))
+        self.repo.put("job", self._job("job-b", "Frontend React"))
+        near = [0.0] * 1024
+        near[0] = 1.0
+        far = [0.0] * 1024
+        far[1] = 1.0
+        query = [0.0] * 1024
+        query[0], query[1] = 0.9, 0.1
+        self.assertEqual(self.repo.update_job_embeddings({"job-a": near, "job-b": far}), 2)
+        hits = self.repo.search_jobs_by_embedding(query, limit=10)
+        self.assertEqual([job["id"] for job, _sim in hits], ["job-a", "job-b"])
+        self.assertGreater(hits[0][1], hits[1][1])
+
+    def test_search_excludes_inactive_and_unembedded_jobs(self):
+        self.repo.put("job", self._job("job-a", "Active embedded"))
+        inactive = self._job("job-b", "Inactive")
+        inactive["status"] = "rejected"
+        self.repo.put("job", inactive)
+        self.repo.put("job", self._job("job-c", "No embedding"))
+        vec = [0.5] * 1024
+        self.repo.update_job_embeddings({"job-a": vec, "job-b": vec})
+        hits = self.repo.search_jobs_by_embedding(vec, limit=10)
+        self.assertEqual([job["id"] for job, _sim in hits], ["job-a"])
+
+    def test_put_job_preserves_embedding(self):
+        self.repo.put("job", self._job("job-a", "Python Backend"))
+        vec = [0.5] * 1024
+        self.repo.update_job_embeddings({"job-a": vec})
+        self.repo.put("job", self._job("job-a", "Python Backend (updated)"))
+        hits = self.repo.search_jobs_by_embedding(vec, limit=10)
+        self.assertEqual(hits[0][0]["id"], "job-a")
+
+    def test_list_jobs_missing_embedding(self):
+        self.repo.put("job", self._job("job-a", "A"))
+        self.repo.put("job", self._job("job-b", "B"))
+        self.repo.update_job_embeddings({"job-a": [0.1] * 1024})
+        self.assertEqual(self.repo.list_jobs_missing_embedding(), ["job-b"])
+
+
 if __name__ == "__main__":
     unittest.main()
