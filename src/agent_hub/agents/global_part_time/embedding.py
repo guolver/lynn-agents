@@ -1,7 +1,7 @@
 """Embedding 生成与余弦相似度计算。
 
-使用 DeepSeek embedding API 为候选人和职位生成向量表示，
-用于语义相似度评分。失败时返回 None，调用方负责降级。
+使用 SiliconFlow 的 OpenAI 兼容 embedding 接口（默认 BAAI/bge-m3，1024 维）
+为候选人和职位生成向量表示。失败时返回 None，调用方负责降级。
 """
 
 from __future__ import annotations
@@ -11,34 +11,45 @@ import math
 import os
 from typing import Any
 
-import httpx
-
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "deepseek-chat")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+EMBEDDING_DIM = 1024
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "https://api.siliconflow.cn/v1")
+SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
+
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        from openai import OpenAI
+
+        _client = OpenAI(api_key=SILICONFLOW_API_KEY, base_url=EMBEDDING_BASE_URL, timeout=15.0)
+    return _client
+
+
+def get_embeddings(texts: list[str]) -> list[list[float] | None]:
+    """批量获取文本向量。空白文本对应位置返回 None；整批失败返回全 None。"""
+    if not SILICONFLOW_API_KEY or not texts:
+        return [None] * len(texts)
+    cleaned = [t.strip()[:8000] if t and t.strip() else None for t in texts]
+    payload = [t for t in cleaned if t is not None]
+    if not payload:
+        return [None] * len(texts)
+    try:
+        response = _get_client().embeddings.create(model=EMBEDDING_MODEL, input=payload)
+    except Exception as exc:
+        logger.warning("Embedding API call failed: %s", exc)
+        return [None] * len(texts)
+    vectors = iter(item.embedding for item in response.data)
+    return [next(vectors) if t is not None else None for t in cleaned]
 
 
 def get_embedding(text: str) -> list[float] | None:
-    """调用 DeepSeek embedding 端点获取文本向量。失败返回 None。"""
-    if not DEEPSEEK_API_KEY:
-        return None
-    if not text.strip():
-        return None
-    try:
-        response = httpx.post(
-            f"{DEEPSEEK_BASE_URL}/v1/embeddings",
-            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
-            json={"model": EMBEDDING_MODEL, "input": text[:8000]},
-            timeout=10.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["data"][0]["embedding"]
-    except Exception as exc:
-        logger.warning("Embedding API call failed: %s", exc)
-        return None
+    """获取单条文本向量。失败返回 None。"""
+    return get_embeddings([text])[0]
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
