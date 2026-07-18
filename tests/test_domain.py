@@ -182,6 +182,43 @@ class SkillScoreExpansionTest(unittest.TestCase):
 
 
 class WeightedSkillEvidenceTest(unittest.TestCase):
+    def test_normalized_direct_match_uses_required_canonical_evidence(self):
+        def expand(names):
+            if names == ["Python"]:
+                return ExpansionResult.from_iterable(
+                    [evidence("Python", "Python", [], ["Python"], 1.0)]
+                )
+            return ExpansionResult()
+
+        _, breakdown, reasons, graph = score_match_with_evidence(
+            {"skills": [{"name": "python"}]},
+            {"skills": ["Python"]},
+            expand,
+        )
+
+        self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(reasons[0], "技能python与职位要求Python直接匹配")
+        self.assertEqual(
+            graph["requirements"],
+            [
+                {
+                    "required_skill": "Python",
+                    "candidate_skill": "python",
+                    "score": 1.0,
+                    "path": {
+                        "input_skill": "Python",
+                        "canonical_skill": "Python",
+                        "target": "Python",
+                        "target_kind": "skill",
+                        "relations": [],
+                        "nodes": ["Python"],
+                        "depth": 0,
+                        "weight": 1.0,
+                    },
+                }
+            ],
+        )
+
     def test_identical_unknown_skill_keeps_direct_score_and_evidence(self):
         def expand(_names):
             return ExpansionResult()

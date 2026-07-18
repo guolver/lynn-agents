@@ -358,7 +358,9 @@ def _graph_skill_score(
 
         # Canonical equality covers both direct names and aliases normalized by the graph.
         for required_path in required_zero:
-            candidate_skill = owned_canonical.get(_norm(required_path.canonical_skill))
+            candidate_skill = direct_raw_skill or owned_canonical.get(
+                _norm(required_path.canonical_skill)
+            )
             if candidate_skill is not None:
                 path_candidates.append((required_path, candidate_skill))
 
