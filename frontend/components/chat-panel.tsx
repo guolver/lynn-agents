@@ -2,14 +2,22 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ChatMessage } from './chat-message';
+import { JobDetailDrawer } from './job-detail-drawer';
 
-import { EMPTY_STATE_SUGGESTIONS } from '../lib/chat-suggestions';
+import { EMPTY_STATE_SUGGESTIONS, QUICK_ACTIONS } from '../lib/chat-suggestions';
+
+type FileData = {
+  name: string;
+  size: number;
+  type: string;
+};
 
 type Message = {
   id: string;
   role: 'user' | 'assistant' | 'tool';
   content: string;
   toolData?: { name: string; result?: Record<string, unknown> };
+  fileData?: FileData;
 };
 
 type AnalysisResult = {
@@ -64,12 +72,18 @@ const TOOL_LABELS: Record<string, string> = {
   get_my_profile: '正在获取档案...',
 };
 
-export function ChatPanel({ sessionId }: { sessionId: string }) {
+export function ChatPanel({
+  sessionId,
+  onTitleUpdate,
+}: {
+  sessionId: string;
+  onTitleUpdate?: (title: string) => void;
+}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [, setSelectedJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -186,8 +200,14 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     const trimmed = text.trim();
     if (!trimmed || isStreaming || isUploading) return;
 
+    const isFirstMessage = messages.filter((m) => m.role === 'user').length === 0;
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: trimmed };
     setMessages((prev) => [...prev, userMsg]);
+
+    if (isFirstMessage && onTitleUpdate) {
+      const title = trimmed.length > 50 ? trimmed.slice(0, 47) + '...' : trimmed;
+      onTitleUpdate(title);
+    }
 
     await streamAssistant(trimmed);
   }
@@ -269,10 +289,15 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       }
 
       const data = await res.json();
+      const isFirstMessage = messages.filter((m) => m.role === 'user').length === 0;
+      if (isFirstMessage && onTitleUpdate) {
+        onTitleUpdate(`简历分析：${file.name}`);
+      }
       const userMsg: Message = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: `已上传简历：${file.name}`,
+        content: '',
+        fileData: { name: file.name, size: file.size, type: file.type },
       };
       const assistantId = crypto.randomUUID();
       setMessages((prev) => [
@@ -308,26 +333,26 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="gpt-chat">
+    <div className="chat-panel">
       {/* Messages */}
-      <div className="gpt-messages">
-        <div className="gpt-messages-inner">
+      <div className="chat-messages">
+        <div className="chat-messages-inner">
           {messages.length === 0 && (
-            <div className="gpt-empty">
-              <div className="gpt-empty-logo">AH</div>
-              <h2 className="gpt-empty-title">我是 Agent Hub 求职助手</h2>
-              <p className="gpt-empty-sub">上传简历、搜索岗位、智能匹配、管理求职偏好 —— 有什么可以帮你的？</p>
-              <div className="gpt-empty-cards">
+            <div className="chat-empty">
+              <div className="chat-empty-logo">AH</div>
+              <h2 className="chat-empty-title">我是 Agent Hub 求职助手</h2>
+              <p className="chat-empty-sub">上传简历、搜索岗位、智能匹配、管理求职偏好 —— 有什么可以帮你的？</p>
+              <div className="chat-empty-cards">
                 {EMPTY_STATE_SUGGESTIONS.map((s) => (
                   <button
                     key={s.label}
-                    className="gpt-empty-card"
+                    className="chat-empty-card"
                     disabled={isStreaming || isUploading}
                     onClick={() =>
                       s.action === 'upload' ? fileInputRef.current?.click() : sendPrompt(s.prompt!)
                     }
                   >
-                    <span className="gpt-empty-card-icon">{s.icon}</span>
+                    <span className="chat-empty-card-icon">{s.icon}</span>
                     <span>{s.label}</span>
                   </button>
                 ))}
@@ -340,6 +365,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
               role={msg.role}
               content={msg.content}
               toolData={msg.toolData}
+              fileData={msg.fileData}
               onCardClick={setSelectedJobId}
               isStreaming={
                 isStreaming && msg.id === messages[messages.length - 1]?.id && msg.role === 'assistant'
@@ -351,8 +377,23 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* Input area */}
-      <div className="gpt-input-wrap">
-        <div className="gpt-input-box">
+      <div className="chat-input-wrap">
+        <div className="chat-quick-actions">
+          {QUICK_ACTIONS.map((q) => (
+            <button
+              key={q.label}
+              className="chat-quick-chip"
+              disabled={isStreaming || isUploading}
+              onClick={() =>
+                q.action === 'upload' ? fileInputRef.current?.click() : sendPrompt(q.prompt!)
+              }
+            >
+              <span>{q.icon}</span>
+              {q.label}
+            </button>
+          ))}
+        </div>
+        <div className="chat-input-box">
           <input
             type="file"
             accept=".pdf"
@@ -361,7 +402,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             style={{ display: 'none' }}
           />
           <button
-            className="gpt-attach-btn"
+            className="chat-attach-btn"
             onClick={() => fileInputRef.current?.click()}
             disabled={isStreaming || isUploading}
             title="上传简历 PDF"
@@ -378,7 +419,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           </button>
           <textarea
             ref={textareaRef}
-            className="gpt-textarea"
+            className="chat-textarea"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -387,7 +428,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             rows={1}
           />
           <button
-            className="gpt-send-btn"
+            className="chat-send-btn"
             onClick={handleSend}
             disabled={!input.trim() || isStreaming}
             title="发送"
@@ -397,9 +438,10 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             </svg>
           </button>
         </div>
-        <div className="gpt-disclaimer">Agent Hub 可能会出错。请核实重要信息。</div>
+        <div className="chat-disclaimer">Agent Hub 可能会出错。请核实重要信息。</div>
       </div>
 
+      {selectedJobId && <JobDetailDrawer jobId={selectedJobId} onClose={() => setSelectedJobId(null)} />}
     </div>
   );
 }
