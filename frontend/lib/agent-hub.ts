@@ -1,5 +1,5 @@
-import { demoAgent, demoAudits, demoJobs, demoSources } from "./demo-data";
-import type { AgentManifest, AuditEvent, Job, Source } from "./types";
+import { demoAgent, demoAudits, demoJobs, demoSkillGraph, demoSources } from "./demo-data";
+import type { AgentManifest, AuditEvent, Job, SkillGraphData, Source } from "./types";
 
 const API_URL = process.env.AGENT_HUB_API_URL ?? "http://127.0.0.1:8000";
 export const DEMO_MODE = process.env.AGENT_HUB_DEMO_MODE !== "false";
@@ -50,4 +50,8 @@ export async function getJob(jobId: string): Promise<Job | null> {
 
 export function getAudits(): Promise<AuditEvent[]> {
   return readJson("/api/v1/audit?limit=100", demoAudits);
+}
+
+export function getSkillGraph(): Promise<SkillGraphData> {
+  return readJson("/platform/v1/skill-graph", demoSkillGraph);
 }

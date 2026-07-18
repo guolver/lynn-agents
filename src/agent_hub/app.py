@@ -56,6 +56,7 @@ def create_app(
             except Exception:
                 logger.warning("Failed to close Neo4j driver", exc_info=True)
 
+    skill_graph_router = None
     neo4j_uri = os.getenv("NEO4J_URI")
     if neo4j_uri:
         try:
@@ -67,6 +68,10 @@ def create_app(
             skill_graph.seed()
             expand_fn = skill_graph.expand
             logger.info("Skill graph initialized from Neo4j at %s", neo4j_uri)
+
+            from .api.skill_graph import create_skill_graph_router
+
+            skill_graph_router = create_skill_graph_router(skill_graph)
         except Exception:
             logger.warning("Failed to initialize skill graph, continuing without it", exc_info=True)
             close_neo4j_driver()
@@ -122,6 +127,8 @@ def create_app(
         application.state.celery_app = celery_instance
     application.include_router(create_platform_router(registry))
     application.include_router(http_api.router)
+    if skill_graph_router is not None:
+        application.include_router(skill_graph_router)
 
     @application.get("/health", tags=["platform"])
     def health() -> dict[str, Any]:

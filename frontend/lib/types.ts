@@ -59,6 +59,22 @@ export type Job = {
   created_at?: string;
 };
 
+export type SkillGraphNode = {
+  id: string;
+  type: 'category' | 'skill' | 'alias';
+};
+
+export type SkillGraphLink = {
+  source: string;
+  target: string;
+  type: 'CHILD_OF' | 'ALIAS_OF';
+};
+
+export type SkillGraphData = {
+  nodes: SkillGraphNode[];
+  links: SkillGraphLink[];
+};
+
 export type AuditEvent = {
   id: number;
   event: string;

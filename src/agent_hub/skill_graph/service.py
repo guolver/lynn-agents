@@ -86,3 +86,42 @@ class SkillGraphService:
             if record is None:
                 return set()
             return set(record["expanded"])
+
+    def graph(self) -> dict:
+        """Return the full skill graph as ``{nodes, links}`` for visualization."""
+        nodes: list[dict] = []
+        links: list[dict] = []
+        with self.driver.session() as session:
+            # Fetch all Category nodes
+            for record in session.run("MATCH (c:Category) RETURN c.name AS name"):
+                nodes.append({"id": record["name"], "type": "category"})
+
+            # Fetch all Skill nodes with optional alias target
+            for record in session.run(
+                "MATCH (s:Skill) "
+                "OPTIONAL MATCH (s)-[:ALIAS_OF]->(canonical:Skill) "
+                "RETURN s.name AS name, canonical.name AS alias_of"
+            ):
+                node_type = "alias" if record["alias_of"] else "skill"
+                nodes.append({"id": record["name"], "type": node_type})
+                if record["alias_of"]:
+                    links.append(
+                        {
+                            "source": record["name"],
+                            "target": record["alias_of"],
+                            "type": "ALIAS_OF",
+                        }
+                    )
+
+            # Fetch CHILD_OF relationships
+            for record in session.run(
+                "MATCH (s:Skill)-[:CHILD_OF]->(c:Category) "
+                "RETURN s.name AS skill, c.name AS category"
+            ):
+                links.append(
+                    {
+                        "source": record["skill"],
+                        "target": record["category"],
+                        "type": "CHILD_OF",
+                    }
+                )

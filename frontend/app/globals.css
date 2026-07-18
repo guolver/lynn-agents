@@ -1003,6 +1003,85 @@ a {
   line-height: 1.6;
 }
 
+/* --- Skill graph --- */
+
+.skill-graph-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.6fr);
+  gap: 16px;
+}
+
+.skill-graph-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.force-graph-svg {
+  width: 100%;
+  height: 520px;
+  display: block;
+}
+
+.skill-graph-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.skill-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.skill-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.skill-legend-category {
+  width: 14px;
+  height: 14px;
+  background: #176b4d;
+}
+
+.skill-legend-skill {
+  background: #326cb0;
+}
+
+.skill-legend-alias {
+  width: 8px;
+  height: 8px;
+  background: #999;
+  opacity: 0.6;
+}
+
+.skill-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.skill-type-category {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.skill-type-skill {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.skill-type-alias {
+  background: #f0f0f0;
+  color: #666;
+}
+
 @media (max-width: 1080px) {
   .metrics-grid,
   .agent-grid {
@@ -1010,7 +1089,8 @@ a {
   }
 
   .dashboard-grid,
-  .split-grid {
+  .split-grid,
+  .skill-graph-split {
     grid-template-columns: 1fr;
   }
 }

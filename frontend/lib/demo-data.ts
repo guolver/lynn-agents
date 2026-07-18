@@ -1,4 +1,4 @@
-import type { AgentManifest, AuditEvent, Job, Source } from "./types";
+import type { AgentManifest, AuditEvent, Job, SkillGraphData, Source } from "./types";
 
 export const demoAgent: AgentManifest = {
   agent_id: "global-part-time",
@@ -67,6 +67,104 @@ export const demoAudits: AuditEvent[] = [
   { id: 67, event: "job.imported", entity_kind: "job", entity_id: "job_0902", actor: "worker", details: { risk: "low" }, created_at: "2026-07-15T09:20:00Z" },
   { id: 66, event: "approval.requested", entity_kind: "approval", entity_id: "apr_084", actor: "operator", details: { action: "send_digest" }, created_at: "2026-07-15T09:08:00Z" },
 ];
+
+export const demoSkillGraph: SkillGraphData = {
+  nodes: [
+    // Categories
+    { id: "前端开发", type: "category" },
+    { id: "后端开发", type: "category" },
+    { id: "数据库", type: "category" },
+    { id: "容器与云", type: "category" },
+    { id: "移动开发", type: "category" },
+    { id: "数据与AI", type: "category" },
+    // 前端开发 skills
+    { id: "React", type: "skill" },
+    { id: "Vue", type: "skill" },
+    { id: "TypeScript", type: "skill" },
+    { id: "Next.js", type: "skill" },
+    { id: "Tailwind CSS", type: "skill" },
+    // 后端开发 skills
+    { id: "Python", type: "skill" },
+    { id: "Java", type: "skill" },
+    { id: "Go", type: "skill" },
+    { id: "Node.js", type: "skill" },
+    { id: "Rust", type: "skill" },
+    // 数据库 skills
+    { id: "PostgreSQL", type: "skill" },
+    { id: "MySQL", type: "skill" },
+    { id: "MongoDB", type: "skill" },
+    { id: "Redis", type: "skill" },
+    // 容器与云 skills
+    { id: "Docker", type: "skill" },
+    { id: "Kubernetes", type: "skill" },
+    { id: "AWS", type: "skill" },
+    // 移动开发 skills
+    { id: "React Native", type: "skill" },
+    { id: "Flutter", type: "skill" },
+    { id: "Swift", type: "skill" },
+    // 数据与AI skills
+    { id: "TensorFlow", type: "skill" },
+    { id: "PyTorch", type: "skill" },
+    { id: "Pandas", type: "skill" },
+    // Aliases
+    { id: "React.js", type: "alias" },
+    { id: "ReactJS", type: "alias" },
+    { id: "Vue.js", type: "alias" },
+    { id: "TS", type: "alias" },
+    { id: "NextJS", type: "alias" },
+    { id: "Golang", type: "alias" },
+    { id: "NodeJS", type: "alias" },
+    { id: "Postgres", type: "alias" },
+    { id: "Mongo", type: "alias" },
+    { id: "K8s", type: "alias" },
+    { id: "RN", type: "alias" },
+    { id: "TF", type: "alias" },
+  ],
+  links: [
+    // CHILD_OF: 前端开发
+    { source: "React", target: "前端开发", type: "CHILD_OF" },
+    { source: "Vue", target: "前端开发", type: "CHILD_OF" },
+    { source: "TypeScript", target: "前端开发", type: "CHILD_OF" },
+    { source: "Next.js", target: "前端开发", type: "CHILD_OF" },
+    { source: "Tailwind CSS", target: "前端开发", type: "CHILD_OF" },
+    // CHILD_OF: 后端开发
+    { source: "Python", target: "后端开发", type: "CHILD_OF" },
+    { source: "Java", target: "后端开发", type: "CHILD_OF" },
+    { source: "Go", target: "后端开发", type: "CHILD_OF" },
+    { source: "Node.js", target: "后端开发", type: "CHILD_OF" },
+    { source: "Rust", target: "后端开发", type: "CHILD_OF" },
+    // CHILD_OF: 数据库
+    { source: "PostgreSQL", target: "数据库", type: "CHILD_OF" },
+    { source: "MySQL", target: "数据库", type: "CHILD_OF" },
+    { source: "MongoDB", target: "数据库", type: "CHILD_OF" },
+    { source: "Redis", target: "数据库", type: "CHILD_OF" },
+    // CHILD_OF: 容器与云
+    { source: "Docker", target: "容器与云", type: "CHILD_OF" },
+    { source: "Kubernetes", target: "容器与云", type: "CHILD_OF" },
+    { source: "AWS", target: "容器与云", type: "CHILD_OF" },
+    // CHILD_OF: 移动开发
+    { source: "React Native", target: "移动开发", type: "CHILD_OF" },
+    { source: "Flutter", target: "移动开发", type: "CHILD_OF" },
+    { source: "Swift", target: "移动开发", type: "CHILD_OF" },
+    // CHILD_OF: 数据与AI
+    { source: "TensorFlow", target: "数据与AI", type: "CHILD_OF" },
+    { source: "PyTorch", target: "数据与AI", type: "CHILD_OF" },
+    { source: "Pandas", target: "数据与AI", type: "CHILD_OF" },
+    // ALIAS_OF
+    { source: "React.js", target: "React", type: "ALIAS_OF" },
+    { source: "ReactJS", target: "React", type: "ALIAS_OF" },
+    { source: "Vue.js", target: "Vue", type: "ALIAS_OF" },
+    { source: "TS", target: "TypeScript", type: "ALIAS_OF" },
+    { source: "NextJS", target: "Next.js", type: "ALIAS_OF" },
+    { source: "Golang", target: "Go", type: "ALIAS_OF" },
+    { source: "NodeJS", target: "Node.js", type: "ALIAS_OF" },
+    { source: "Postgres", target: "PostgreSQL", type: "ALIAS_OF" },
+    { source: "Mongo", target: "MongoDB", type: "ALIAS_OF" },
+    { source: "K8s", target: "Kubernetes", type: "ALIAS_OF" },
+    { source: "RN", target: "React Native", type: "ALIAS_OF" },
+    { source: "TF", target: "TensorFlow", type: "ALIAS_OF" },
+  ],
+};
 
 export const dashboardMetrics = [
   { label: "已注册 Agent", value: "01", delta: "平台运行正常", code: "AGT" },

@@ -7,7 +7,8 @@ import type { ReactNode } from "react";
 const platformNav = [
   { href: "/dashboard", label: "运行总览", glyph: "01" },
   { href: "/agents", label: "Agent 目录", glyph: "02" },
-  { href: "/audit", label: "审计中心", glyph: "03" },
+  { href: "/skills", label: "技能图谱", glyph: "03" },
+  { href: "/audit", label: "审计中心", glyph: "04" },
 ];
 
 const businessNav = [
