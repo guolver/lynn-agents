@@ -51,10 +51,14 @@ class DomainRulesTest(unittest.TestCase):
     def test_hard_filter_and_weighted_score(self):
         self.assertEqual(hard_filter(self.candidate, self.job), [])
         score, breakdown, reasons = score_match(self.candidate, self.job)
-        # Without embed_fn, semantic defaults to 0.5 (neutral); total ~0.93 for a perfect match
-        self.assertGreaterEqual(score, 0.93)
+        # Without embed_fn/semantic_similarity, semantic is excluded (uninformative) rather
+        # than defaulting to a neutral 0.5. active_weight = 0.82 (all but semantic);
+        # base = (1.0*0.32 + 1.0*0.11 + 1.0*0.11 + 1.0*0.11 + 1.0*0.06 + 1.0*0.05 + 0.9*0.06) / 0.82
+        # total = round(base * (0.5 + 0.5*0.82), 4) = 0.9033
+        self.assertAlmostEqual(score, 0.9033, places=4)
         self.assertEqual(breakdown["skills"], 1.0)
-        self.assertEqual(breakdown["semantic"], 0.5)
+        self.assertEqual(breakdown["semantic"], 0.0)
+        self.assertIn("semantic", breakdown["uninformative"])
         self.assertEqual(breakdown["availability"], 1.0)
         self.assertIn("薪资达到最低期望", reasons)
 
@@ -188,7 +192,99 @@ class PrecomputedSemanticScoreTest(unittest.TestCase):
         candidate = candidate_payload()
         job = job_payload()
         _total, breakdown, _reasons = score_match(candidate, job)
-        self.assertEqual(breakdown["semantic"], 0.5)
+        self.assertEqual(breakdown["semantic"], 0.0)
+        self.assertIn("semantic", breakdown["uninformative"])
+
+
+class CompletenessWeightingTests(unittest.TestCase):
+    """信息完备度加权：缺信息分项剔除 + 归一化 + 折扣（spec 2026-07-18）。"""
+
+    def setUp(self):
+        self.candidate = {
+            "skills": [{"name": "python"}, {"name": "react"}, {"name": "typescript"}],
+            "languages": [{"code": "en"}],
+            "country": "CN",
+            "timezone": "Asia/Shanghai",
+            "minimum_hourly_rate": {"amount": 20, "currency": "USD"},
+            "availability_hours_per_week": 20,
+            "desired_roles": ["backend"],
+        }
+        self.rich_job = {
+            "title_original": "Backend Engineer",
+            "skills": ["python", "react", "typescript", "go", "rust", "kafka"],
+            "languages": ["en"],
+            "countries_allowed": ["GLOBAL"],
+            "timezone_requirements": [],
+            "compensation_max": 40,
+            "compensation_currency": "USD",
+            "hours_per_week_min": 10,
+            "hours_per_week_max": 20,
+            "categories": ["backend"],
+            "quality_score": 0.5,
+        }
+        self.sparse_job = {
+            "title_original": "Head of Marketing",
+            "countries_allowed": ["GLOBAL"],
+            "compensation_max": 110,
+            "compensation_currency": "USD",
+            "quality_score": 0.5,
+        }
+
+    def test_sparse_job_ranks_below_matching_job(self):
+        rich_score, _, _ = score_match(self.candidate, self.rich_job)
+        sparse_score, _, _ = score_match(self.candidate, self.sparse_job)
+        self.assertGreater(rich_score, sparse_score)
+
+    def test_uninformative_components_listed(self):
+        _, breakdown, _ = score_match(self.candidate, self.sparse_job)
+        for key in ("skills", "semantic", "language", "availability"):
+            self.assertIn(key, breakdown["uninformative"])
+        self.assertNotIn("location_timezone", breakdown["uninformative"])
+        self.assertNotIn("preference", breakdown["uninformative"])
+
+    def test_full_information_no_discount(self):
+        total, breakdown, _ = score_match(self.candidate, self.rich_job, semantic_similarity=0.9)
+        self.assertEqual(breakdown["uninformative"], [])
+        self.assertEqual(breakdown["completeness"], 1.0)
+        expected = round(
+            0.32 * 0.5
+            + 0.18 * 1.0
+            + 0.11 * 1.0
+            + 0.11 * 1.0
+            + 0.11 * 1.0
+            + 0.06 * 1.0
+            + 0.05 * 1.0
+            + 0.06 * 0.5,
+            4,
+        )
+        self.assertAlmostEqual(total, expected, places=4)
+
+    def test_discount_formula_on_sparse_job(self):
+        total, breakdown, _ = score_match(self.candidate, self.sparse_job)
+        # informative: location_timezone 0.11(=1.0) + compensation 0.11(=1.0)
+        # + preference 0.05(=0.4) + freshness_quality 0.06(=0.5) → active=0.33
+        base = (0.11 * 1.0 + 0.11 * 1.0 + 0.05 * 0.4 + 0.06 * 0.5) / 0.33
+        factor = 0.5 + 0.5 * 0.33
+        self.assertAlmostEqual(breakdown["completeness"], 0.33, places=4)
+        self.assertAlmostEqual(total, round(base * factor, 4), places=3)
+
+    def test_no_skill_requirement_never_claims_skill_match(self):
+        _, _, reasons = score_match(self.candidate, self.sparse_job)
+        self.assertFalse(any("技能" in r for r in reasons))
+
+    def test_low_completeness_adds_disclaimer(self):
+        _, _, reasons = score_match(self.candidate, self.sparse_job)
+        self.assertIn("职位信息不完整，评分仅供参考", reasons)
+
+    def test_high_completeness_has_no_disclaimer(self):
+        _, _, reasons = score_match(self.candidate, self.rich_job)
+        self.assertNotIn("职位信息不完整，评分仅供参考", reasons)
+
+    def test_zero_skill_overlap_scores_zero_not_half(self):
+        job = {**self.rich_job, "skills": ["golang", "rust"]}
+        _, breakdown, _ = score_match(self.candidate, job)
+        self.assertEqual(breakdown["skills"], 0.0)
+        self.assertNotIn("skills", breakdown["uninformative"])
 
 
 if __name__ == "__main__":

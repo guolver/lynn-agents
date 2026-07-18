@@ -15,17 +15,21 @@ from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-RULE_VERSION = "2026-07-18.1"
+RULE_VERSION = "2026-07-18.2"
 SCORE_WEIGHTS = {
-    "skills": 0.28,
-    "semantic": 0.12,
-    "language": 0.13,
-    "location_timezone": 0.13,
-    "compensation": 0.13,
-    "availability": 0.08,
-    "preference": 0.07,
+    "skills": 0.32,
+    "semantic": 0.18,
+    "language": 0.11,
+    "location_timezone": 0.11,
+    "compensation": 0.11,
+    "availability": 0.06,
+    "preference": 0.05,
     "freshness_quality": 0.06,
 }
+# 完备度折扣：total = base × (FLOOR + (1-FLOOR) × completeness)
+COMPLETENESS_FLOOR = 0.5
+# completeness 低于该阈值时在理由中追加"信息不完整"提示
+LOW_COMPLETENESS_THRESHOLD = 0.7
 
 HIGH_RISK_TERMS = {
     "刷单",
@@ -187,14 +191,14 @@ def hard_filter(
     return failures
 
 
-def _availability_score(candidate: dict[str, Any], job: dict[str, Any]) -> float:
-    """候选人工时可用性与职位需求的梯度匹配。"""
+def _availability_score(candidate: dict[str, Any], job: dict[str, Any]) -> tuple[float, bool]:
+    """候选人工时可用性与职位需求的梯度匹配；职位未填工时要求时视为无信息。"""
     avail = candidate.get("availability_hours_per_week", 0)
     job_min = job.get("hours_per_week_min")
     job_max = job.get("hours_per_week_max")
 
     if job_min is None and job_max is None:
-        return 0.7  # 无要求 → 中性
+        return 0.0, False
 
     if job_max is None:
         job_max = int(job_min * 1.5) if job_min else 40
@@ -202,12 +206,12 @@ def _availability_score(candidate: dict[str, Any], job: dict[str, Any]) -> float
         job_min = 0
 
     if avail >= job_max:
-        return 1.0
+        return 1.0, True
     elif avail >= job_min:
         span = job_max - job_min
-        return 1.0 if span == 0 else 0.7 + 0.3 * (avail - job_min) / span
+        return (1.0 if span == 0 else 0.7 + 0.3 * (avail - job_min) / span), True
     else:
-        return max(0.3 * avail / max(job_min, 1), 0.0)
+        return max(0.3 * avail / max(job_min, 1), 0.0), True
 
 
 def _semantic_score(
@@ -215,33 +219,33 @@ def _semantic_score(
     job: dict[str, Any],
     embed_fn: Callable[[str], list[float] | None] | None = None,
     precomputed: float | None = None,
-) -> float:
-    """通过 embedding 余弦相似度计算候选人与职位的语义匹配度。
+) -> tuple[float, bool]:
+    """通过 embedding 余弦相似度计算语义匹配度；无相似度可用时视为无信息。
 
     ``precomputed`` 为向量召回阶段带回的相似度；提供时跳过实时 embedding 调用。
     """
     if precomputed is None:
         if embed_fn is None:
-            return 0.5
+            return 0.0, False
         from .embedding import build_candidate_text, build_job_text, cosine_similarity
 
         cand_emb = embed_fn(build_candidate_text(candidate))
         job_emb = embed_fn(build_job_text(job))
         if cand_emb is None or job_emb is None:
-            return 0.5
+            return 0.0, False
         precomputed = cosine_similarity(cand_emb, job_emb)
-    return max(0.0, min(1.0, (precomputed - 0.3) / 0.6))  # 线性映射 [0.3, 0.9] → [0, 1]
+    return max(0.0, min(1.0, (precomputed - 0.3) / 0.6)), True  # 线性映射 [0.3, 0.9] → [0, 1]
 
 
 def _skill_score(
     candidate: dict[str, Any],
     job: dict[str, Any],
     expand_fn: Callable[[list[str]], set[str]] | None = None,
-) -> tuple[float, list[str], list[str]]:
+) -> tuple[float, bool, list[str], list[str]]:
     raw_required = list(job.get("skills") or [])
     required = {_norm(x) for x in raw_required}
     if not required:
-        return 0.5, [], []
+        return 0.0, False, [], []
     raw_owned = [x["name"] if isinstance(x, dict) else x for x in candidate.get("skills") or []]
     owned = {_norm(x) for x in raw_owned}
     direct_set = required & owned
@@ -258,7 +262,7 @@ def _skill_score(
     direct = sorted(direct_set)
     indirect = sorted(indirect_set)
     score = (len(direct) + len(indirect) * 0.6) / len(required)
-    return min(score, 1.0), direct, indirect
+    return min(score, 1.0), True, direct, indirect
 
 
 def score_match(
@@ -267,15 +271,18 @@ def score_match(
     expand_fn: Callable[[list[str]], set[str]] | None = None,
     embed_fn: Callable[[str], list[float] | None] | None = None,
     semantic_similarity: float | None = None,
-) -> tuple[float, dict[str, float], list[str]]:
-    """按照版本化权重生成可复现总分、分项分数和面向用户的理由。"""
-    skill, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
-    semantic = _semantic_score(candidate, job, embed_fn, precomputed=semantic_similarity)
+) -> tuple[float, dict[str, Any], list[str]]:
+    """信息完备度加权打分：无信息分项剔除，剩余分项归一化后乘完备度折扣。"""
+    skill, skill_inf, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
+    semantic, semantic_inf = _semantic_score(
+        candidate, job, embed_fn, precomputed=semantic_similarity
+    )
     required_langs = set(job.get("languages") or [])
     owned_langs = {
         x["code"] if isinstance(x, dict) else x for x in candidate.get("languages") or []
     }
-    language = len(required_langs & owned_langs) / len(required_langs) if required_langs else 1.0
+    language_inf = bool(required_langs)
+    language = len(required_langs & owned_langs) / len(required_langs) if required_langs else 0.0
     countries = set(job.get("countries_allowed") or [])
     location = (
         1.0
@@ -288,18 +295,27 @@ def score_match(
     location_timezone = 0.7 * location + 0.3 * timezone
     minimum = (candidate.get("minimum_hourly_rate") or {}).get("amount")
     maximum = job.get("compensation_max")
-    compensation = (
-        0.5
-        if maximum is None or minimum is None
-        else min(float(maximum) / max(float(minimum), 1), 1.0)
-    )
-    availability = _availability_score(candidate, job)
+    compensation_inf = maximum is not None and minimum is not None
+    compensation = min(float(maximum) / max(float(minimum), 1), 1.0) if compensation_inf else 0.0
+    availability, availability_inf = _availability_score(candidate, job)
     desired = set(candidate.get("desired_roles") or [])
     categories = set(job.get("categories") or [])
-    preference = 1.0 if not desired or desired & categories else 0.4
+    preference_inf = bool(desired)
+    preference = (1.0 if desired & categories else 0.4) if desired else 0.0
     quality = float(job.get("quality_score", 0.5))
     freshness_quality = min(max(quality, 0.0), 1.0)
-    breakdown = {
+
+    informative = {
+        "skills": skill_inf,
+        "semantic": semantic_inf,
+        "language": language_inf,
+        "location_timezone": True,
+        "compensation": compensation_inf,
+        "availability": availability_inf,
+        "preference": preference_inf,
+        "freshness_quality": True,
+    }
+    breakdown: dict[str, Any] = {
         "skills": round(skill, 4),
         "semantic": round(semantic, 4),
         "language": round(language, 4),
@@ -309,15 +325,20 @@ def score_match(
         "preference": round(preference, 4),
         "freshness_quality": round(freshness_quality, 4),
     }
-    total = round(sum(breakdown[k] * SCORE_WEIGHTS[k] for k in SCORE_WEIGHTS), 4)
+    active_weight = sum(SCORE_WEIGHTS[k] for k, v in informative.items() if v)
+    base = sum(breakdown[k] * SCORE_WEIGHTS[k] for k, v in informative.items() if v) / active_weight
+    completeness = round(active_weight, 4)
+    factor = COMPLETENESS_FLOOR + (1 - COMPLETENESS_FLOOR) * active_weight
+    total = round(base * factor, 4)
+    breakdown["completeness"] = completeness
+    breakdown["uninformative"] = sorted(k for k, v in informative.items() if not v)
+
     reasons = []
     if direct_skills:
         reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
     if indirect_skills:
         reasons.append(f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关")
-    if not direct_skills and not indirect_skills and skill >= 0.5:
-        reasons.append("技能与职位要求高度匹配")
-    if semantic >= 0.7:
+    if semantic_inf and semantic >= 0.7:
         reasons.append("简历与职位描述语义高度相似")
     if location_timezone >= 0.7:
         reasons.append("地区与工作时区满足要求")
@@ -327,4 +348,6 @@ def score_match(
         reasons.append("可用工时充分满足职位需求")
     if preference >= 1:
         reasons.append("职位类别符合你的偏好")
+    if completeness < LOW_COMPLETENESS_THRESHOLD:
+        reasons.append("职位信息不完整，评分仅供参考")
     return total, breakdown, reasons or ["该职位通过了你的全部硬性条件"]
