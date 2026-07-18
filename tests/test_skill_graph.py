@@ -219,3 +219,28 @@ class EndToEndSkillMatchTest(unittest.TestCase):
 
         # Direct(Python)=1.0 + Indirect(前端开发)=0.6 → avg = 0.8
         self.assertAlmostEqual(breakdown["skills"], 0.8, places=1)
+
+    def test_reverse_alias_direction_matches_with_real_graph(self):
+        from agent_hub.agents.global_part_time.domain import score_match_with_evidence
+
+        _, breakdown, _, evidence = score_match_with_evidence(
+            {"skills": [{"name": "Kubernetes"}]},
+            {"skills": ["K8s"]},
+            self.service.expand_with_evidence,
+        )
+        self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(evidence["requirements"][0]["score"], 1.0)
+
+    def test_real_graph_requires_path_is_explainable(self):
+        from agent_hub.agents.global_part_time.domain import score_match_with_evidence
+
+        _, breakdown, reasons, evidence = score_match_with_evidence(
+            {"skills": [{"name": "Docker"}]},
+            {"skills": ["Kubernetes"]},
+            self.service.expand_with_evidence,
+        )
+        self.assertEqual(breakdown["skills"], 0.75)
+        path = evidence["requirements"][0]["path"]
+        self.assertEqual(path["relations"], ["REQUIRES"])
+        self.assertEqual(path["nodes"], ["Kubernetes", "Docker"])
+        self.assertTrue(any("Docker" in reason and "Kubernetes" in reason for reason in reasons))
