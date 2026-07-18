@@ -160,7 +160,7 @@ SQLite 是默认存储，适合本地开发和单元测试。如需使用 Postgr
 ### 1. 启动基础设施
 
 ```bash
-make infra-up    # 启动 PostgreSQL 16 + Redis 7（Docker Compose）
+make infra-up    # 启动 PostgreSQL 16 + Redis 7 + Neo4j 5（Docker Compose）
 ```
 
 服务端口（仅绑定 127.0.0.1）：
@@ -225,6 +225,8 @@ http://127.0.0.1:7474，Bolt 地址为 `bolt://127.0.0.1:7687`。
 ### 1. 启动并检查 Neo4j
 
 ```bash
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=agent_hub_graph
 docker compose -f compose.dev.yaml up -d neo4j --wait
 docker compose -f compose.dev.yaml ps neo4j
 ```
