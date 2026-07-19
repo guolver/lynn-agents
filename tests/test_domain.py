@@ -90,6 +90,15 @@ class DomainRulesTest(unittest.TestCase):
         )
         self.assertGreater(matching_score, mismatched_score)
 
+    def test_reasons_cover_multiple_informative_dimensions(self):
+        _, _, reasons = score_match(self.candidate, self.job, semantic_similarity=0.9)
+        combined = "|".join(reasons)
+
+        self.assertIn("技能", combined)
+        self.assertIn("语义高度相似", combined)
+        self.assertIn("语言要求", combined)
+        self.assertTrue("薪资" in combined or "可用工时" in combined)
+
     def test_risk_rules_override_content_quality(self):
         risky = dict(self.job, description_original="先付款并提供验证码，然后开始刷单")
         result = assess_risk(risky)
@@ -325,6 +334,12 @@ class CompletenessWeightingTests(unittest.TestCase):
     def test_high_completeness_has_no_disclaimer(self):
         _, _, reasons = score_match(self.candidate, self.rich_job)
         self.assertNotIn("职位信息不完整，评分仅供参考", reasons)
+
+    def test_positive_reasons_are_capped_at_five(self):
+        _, _, reasons = score_match(self.candidate, self.rich_job, semantic_similarity=0.9)
+        positive = [reason for reason in reasons if "评分仅供参考" not in reason]
+
+        self.assertLessEqual(len(positive), 5)
 
     def test_zero_skill_overlap_scores_zero_not_half(self):
         job = {**self.rich_job, "skills": ["golang", "rust"]}

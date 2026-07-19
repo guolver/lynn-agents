@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .recommendation_explainer import generate_recommendation_summaries
 from .service import AgentService
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,24 @@ def execute_tool(
                     match["compensation_max"] = job.get("compensation_max")
                     match["compensation_currency"] = job.get("compensation_currency", "USD")
                     match["work_mode"] = job.get("work_mode", "remote")
+            try:
+                summaries = generate_recommendation_summaries(
+                    service.get_candidate(candidate_id),
+                    result.get("matches", []),
+                    jobs_by_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Recommendation summary generation failed for candidate %s",
+                    candidate_id,
+                    exc_info=True,
+                )
+                summaries = {}
+            for match in result.get("matches", []):
+                summary = summaries.get(match.get("job_id"))
+                if summary:
+                    match["recommendation_summary"] = summary
+                    service.repo.put("match", match)
             return result
 
         if name == "search_jobs":

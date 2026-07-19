@@ -53,6 +53,82 @@ def test_execute_run_matches():
     service.run_matches.assert_called_once_with("c1", "test", 10, exclude_job_ids=None)
 
 
+def test_execute_run_matches_attaches_recommendation_summary(monkeypatch):
+    import agent_hub.agents.global_part_time.chat_tools as chat_tools
+
+    service = MagicMock()
+    service.run_matches.return_value = {
+        "matches": [{"id": "m1", "job_id": "j1", "score": 0.8, "reasons": ["技能匹配"]}],
+        "filtered": [],
+    }
+    service.repo.list.return_value = [
+        {"id": "j1", "title_original": "Frontend", "company_name": "Example"}
+    ]
+    service.get_candidate.return_value = {"id": "c1", "skills": [{"name": "React"}]}
+    monkeypatch.setattr(
+        chat_tools,
+        "generate_recommendation_summaries",
+        lambda candidate, matches, jobs_by_id: {"j1": "你的 React 经验与岗位职责契合。"},
+    )
+
+    result = execute_tool("run_matches", {"candidate_id": "c1"}, service=service, actor="test")
+
+    assert result["matches"][0]["recommendation_summary"] == "你的 React 经验与岗位职责契合。"
+    service.repo.put.assert_called_once_with("match", result["matches"][0])
+
+
+def test_execute_run_matches_keeps_matches_when_summary_is_unavailable(monkeypatch):
+    import agent_hub.agents.global_part_time.chat_tools as chat_tools
+
+    service = MagicMock()
+    service.run_matches.return_value = {
+        "matches": [{"id": "m1", "job_id": "j1", "score": 0.8, "reasons": ["技能匹配"]}],
+        "filtered": [],
+    }
+    service.repo.list.return_value = [
+        {"id": "j1", "title_original": "Frontend", "company_name": "Example"}
+    ]
+    service.get_candidate.return_value = {"id": "c1"}
+    monkeypatch.setattr(
+        chat_tools,
+        "generate_recommendation_summaries",
+        lambda candidate, matches, jobs_by_id: {},
+    )
+
+    result = execute_tool("run_matches", {"candidate_id": "c1"}, service=service, actor="test")
+
+    assert len(result["matches"]) == 1
+    assert "recommendation_summary" not in result["matches"][0]
+
+
+def test_execute_run_matches_keeps_matches_when_explainer_raises(monkeypatch):
+    import agent_hub.agents.global_part_time.chat_tools as chat_tools
+
+    service = MagicMock()
+    service.run_matches.return_value = {
+        "matches": [{"id": "m1", "job_id": "j1", "score": 0.8, "reasons": ["技能匹配"]}],
+        "filtered": [],
+    }
+    service.repo.list.return_value = [
+        {"id": "j1", "title_original": "Frontend", "company_name": "Example"}
+    ]
+    service.get_candidate.return_value = {"id": "c1"}
+
+    def raise_explainer_error(candidate, matches, jobs_by_id):
+        raise RuntimeError("DeepSeek unavailable")
+
+    monkeypatch.setattr(
+        chat_tools,
+        "generate_recommendation_summaries",
+        raise_explainer_error,
+    )
+
+    result = execute_tool("run_matches", {"candidate_id": "c1"}, service=service, actor="test")
+
+    assert len(result["matches"]) == 1
+    assert "error" not in result
+
+
 def test_execute_unknown_tool():
     service = MagicMock()
     result = execute_tool("nonexistent", {}, service=service, actor="test")

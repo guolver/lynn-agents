@@ -15,7 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-RULE_VERSION = "2026-07-19.1"
+RULE_VERSION = "2026-07-19.2"
 SCORE_WEIGHTS = {
     "skills": 0.32,
     "semantic": 0.18,
@@ -344,21 +344,37 @@ def score_match(
     breakdown["completeness"] = completeness
     breakdown["uninformative"] = sorted(k for k, v in informative.items() if not v)
 
-    reasons = []
+    positive_reasons = []
     if direct_skills:
-        reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
+        positive_reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
     if indirect_skills:
-        reasons.append(f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关")
+        positive_reasons.append(
+            f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关"
+        )
     if semantic_inf and semantic >= 0.7:
-        reasons.append("简历与职位描述语义高度相似")
-    if location_timezone >= 0.7:
-        reasons.append("地区与工作时区满足要求")
-    if compensation >= 1:
-        reasons.append("薪资达到最低期望")
-    if availability >= 0.8:
-        reasons.append("可用工时充分满足职位需求")
+        positive_reasons.append("简历经历与岗位职责语义高度相似")
+    elif semantic_inf and semantic >= 0.35:
+        positive_reasons.append("简历经历与岗位职责具有相关性")
     if preference >= 1:
-        reasons.append("职位类别符合你的偏好")
+        positive_reasons.append("职位类别符合你的目标方向")
+    if language_inf and language >= 1:
+        positive_reasons.append("候选人语言能力满足职位语言要求")
+    if compensation >= 1:
+        positive_reasons.append("薪资达到最低期望")
+    if availability_inf and availability >= 0.7:
+        positive_reasons.append("每周可用工时满足职位需求")
+    has_country_requirement = bool(countries) and "GLOBAL" not in countries
+    has_timezone_requirement = bool(job.get("timezone_requirements"))
+    if has_country_requirement and location >= 1 and has_timezone_requirement and timezone >= 1:
+        positive_reasons.append("工作地区与时区均满足职位要求")
+    elif has_country_requirement and location >= 1:
+        positive_reasons.append("工作地区满足职位要求")
+    elif has_timezone_requirement and timezone >= 1:
+        positive_reasons.append("工作时区满足职位要求")
+    if freshness_quality >= 0.75:
+        positive_reasons.append("岗位信息完整度和可信度较高")
+
+    reasons = positive_reasons[:5]
     if completeness < LOW_COMPLETENESS_THRESHOLD:
         reasons.append("职位信息不完整，评分仅供参考")
     return total, breakdown, reasons or ["该职位通过了你的全部硬性条件"]

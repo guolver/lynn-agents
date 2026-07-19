@@ -11,6 +11,7 @@ type ToolData = {
       job_title?: string;
       company_name?: string;
       score?: number;
+      recommendation_summary?: string;
       reasons?: string[];
       work_mode?: string;
       compensation_max?: number;
@@ -102,15 +103,17 @@ export function ChatMessage({
             <div className="chat-msg-matches">
               {matchCards.map((m, i) => (
                 <div className="chat-match-item" key={i}>
-                  <div className="chat-match-reason">
-                    <span className="chat-match-reason-icon">💡</span>
-                    {(m.reasons?.length ? m.reasons : ['综合技能与偏好的整体匹配推荐']).join('；')}
-                  </div>
+                  {m.recommendation_summary && (
+                    <div className="chat-match-reason">
+                      <span className="chat-match-reason-icon">💡</span>
+                      {m.recommendation_summary}
+                    </div>
+                  )}
                   <MatchCard
                     title={m.job_title ?? 'Unknown'}
                     company={m.company_name ?? ''}
                     score={m.score ?? 0}
-                    reasons={[]}
+                    reasons={m.reasons ?? []}
                     workMode={m.work_mode}
                     compensation={
                       m.compensation_max ? `$${m.compensation_max}/h ${m.compensation_currency ?? ''}` : undefined

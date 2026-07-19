@@ -84,7 +84,7 @@ class ServiceWorkflowTest(unittest.TestCase):
         result = self.service.run_matches(candidate["id"], "scheduler")
 
         self.assertEqual(len(result["matches"]), 1)
-        self.assertEqual(result["matches"][0]["rule_version"], "2026-07-19.1")
+        self.assertEqual(result["matches"][0]["rule_version"], "2026-07-19.2")
         self.assertNotIn(
             "country_mismatch",
             [reason for item in result["filtered"] for reason in item["reasons"]],
