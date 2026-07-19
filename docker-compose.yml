@@ -25,6 +25,7 @@ services:
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.siliconflow.cn/v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-insecure-secret-change-me-in-any-real-deploy}
     depends_on:
       postgres:
         condition: service_healthy
