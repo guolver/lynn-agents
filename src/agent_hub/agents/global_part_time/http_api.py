@@ -282,10 +282,13 @@ def list_jobs(
     review_status: str | None = None,
     q: str | None = None,
     work_mode: str | None = None,
+    category: str | None = None,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> dict[str, Any]:
-    total, jobs = repository.search_jobs(q=q, work_mode=work_mode, offset=offset, limit=limit)
+    total, jobs = repository.search_jobs(
+        q=q, work_mode=work_mode, category=category, offset=offset, limit=limit
+    )
     # Apply legacy filters if provided
     if status or review_status:
         jobs = [
@@ -295,6 +298,15 @@ def list_jobs(
             and (not review_status or job.get("review_status") == review_status)
         ]
     return {"total": total, "offset": offset, "limit": limit, "jobs": jobs}
+
+
+@router.get("/jobs/categories")
+def list_job_categories(
+    repository: RepositoryDep,
+    limit: int = Query(default=30, ge=1, le=100),
+) -> dict[str, Any]:
+    """活跃职位类别聚合，供前端筛选器渲染选项。"""
+    return {"categories": repository.list_job_categories(limit)}
 
 
 @router.get("/jobs/{job_id}")

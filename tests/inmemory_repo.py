@@ -48,6 +48,7 @@ class InMemoryRepository:
         self,
         q: str | None = None,
         work_mode: str | None = None,
+        category: str | None = None,
         offset: int = 0,
         limit: int = 20,
     ) -> tuple[int, list[dict[str, Any]]]:
@@ -63,7 +64,19 @@ class InMemoryRepository:
             ]
         if work_mode:
             filtered = [j for j in filtered if j.get("work_mode") == work_mode]
+        if category:
+            filtered = [j for j in filtered if category in (j.get("categories") or [])]
         return len(filtered), filtered[offset : offset + limit]
+
+    def list_job_categories(self, limit: int = 30) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for job in self.list("job"):
+            if job.get("status") != "active":
+                continue
+            for cat in job.get("categories") or []:
+                counts[cat] = counts.get(cat, 0) + 1
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        return [{"name": name, "count": count} for name, count in ranked[:limit]]
 
     def list_by_session(self, session_id: str) -> list[dict[str, Any]]:
         messages = [

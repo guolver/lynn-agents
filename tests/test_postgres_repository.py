@@ -115,5 +115,60 @@ class PostgresVectorSearchTest(unittest.TestCase):
         self.assertEqual(self.repo.list_jobs_missing_embedding(), ["job-b"])
 
 
+@unittest.skipUnless(TEST_DATABASE_URL, "TEST_DATABASE_URL not set")
+class PostgresCategoryFilterTest(unittest.TestCase):
+    def setUp(self) -> None:
+        from agent_hub.database.models import Base
+        from agent_hub.database.repository import PostgresRepository
+
+        from tests.factories import ensure_vector_extension
+
+        self.repo = PostgresRepository(TEST_DATABASE_URL)
+        ensure_vector_extension(self.repo._engine)
+        Base.metadata.drop_all(self.repo._engine)
+        Base.metadata.create_all(self.repo._engine)
+
+    @staticmethod
+    def _job(job_id: str, title: str, categories: list[str]) -> dict:
+        return {
+            "id": job_id,
+            "source_id": "s1",
+            "dedup_key": job_id,
+            "title_original": title,
+            "company_name": "ACME",
+            "status": "active",
+            "categories": categories,
+        }
+
+    def test_search_jobs_filters_by_category(self):
+        self.repo.put("job", self._job("job-a", "Backend Dev", ["Developer", "Backend"]))
+        self.repo.put("job", self._job("job-b", "Sales Rep", ["Sales"]))
+        self.repo.put("job", self._job("job-c", "Fullstack", ["Developer"]))
+
+        total, jobs = self.repo.search_jobs(category="Developer")
+        self.assertEqual(total, 2)
+        self.assertEqual({j["id"] for j in jobs}, {"job-a", "job-c"})
+
+    def test_search_jobs_combines_category_with_keyword(self):
+        self.repo.put("job", self._job("job-a", "Backend Dev", ["Developer"]))
+        self.repo.put("job", self._job("job-b", "Frontend Dev", ["Developer"]))
+
+        total, jobs = self.repo.search_jobs(q="Backend", category="Developer")
+        self.assertEqual(total, 1)
+        self.assertEqual(jobs[0]["id"], "job-a")
+
+    def test_list_job_categories_aggregates_active_only(self):
+        self.repo.put("job", self._job("job-a", "A", ["Developer", "Backend"]))
+        self.repo.put("job", self._job("job-b", "B", ["Developer"]))
+        inactive = self._job("job-c", "C", ["Sales"])
+        inactive["status"] = "pending_review"
+        self.repo.put("job", inactive)
+
+        cats = self.repo.list_job_categories()
+        self.assertEqual(cats[0], {"name": "Developer", "count": 2})
+        self.assertIn({"name": "Backend", "count": 1}, cats)
+        self.assertNotIn({"name": "Sales", "count": 1}, cats)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -117,5 +117,45 @@ class APISmokeTest(unittest.TestCase):
         self.assertIn("candidate_id", response.json()["detail"])
 
 
+class JobsCategoryFilterTest(unittest.TestCase):
+    def setUp(self):
+        self.repository = Repository(":memory:")
+        self.client = TestClient(create_app(self.repository))
+        base = job_payload()
+        for i, (title, categories) in enumerate(
+            [
+                ("Backend Dev", ["Developer", "Backend"]),
+                ("Sales Rep", ["Sales"]),
+                ("Fullstack Dev", ["Developer"]),
+            ]
+        ):
+            job = dict(
+                base,
+                id=f"job-{i}",
+                source_job_id=f"job-{i}",
+                canonical_url=f"https://feed.example.com/jobs/{i}",
+                title_original=title,
+                categories=categories,
+                status="active",
+            )
+            self.repository.put("job", job)
+
+    def test_list_jobs_filters_by_category(self):
+        response = self.client.get("/api/v1/jobs", params={"category": "Developer"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["total"], 2)
+        self.assertEqual(
+            {j["title_original"] for j in data["jobs"]}, {"Backend Dev", "Fullstack Dev"}
+        )
+
+    def test_list_job_categories_aggregated(self):
+        response = self.client.get("/api/v1/jobs/categories")
+        self.assertEqual(response.status_code, 200)
+        cats = response.json()["categories"]
+        self.assertEqual(cats[0], {"name": "Developer", "count": 2})
+        self.assertIn({"name": "Sales", "count": 1}, cats)
+
+
 if __name__ == "__main__":
     unittest.main()

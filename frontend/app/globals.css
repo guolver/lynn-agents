@@ -1464,6 +1464,30 @@ a {
   font-weight: 600;
 }
 
+.jh-filter-select {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-mid);
+  font-size: 12px;
+  cursor: pointer;
+  transition: 150ms ease;
+  max-width: 180px;
+}
+
+.jh-filter-select:hover {
+  background: var(--bg-alt);
+  color: var(--ink);
+}
+
+.jh-filter-select.active {
+  background: var(--amber-soft);
+  color: var(--amber-deep);
+  border-color: var(--amber);
+  font-weight: 600;
+}
+
 /* Results header */
 .jh-results-header {
   display: flex;

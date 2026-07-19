@@ -86,6 +86,8 @@ export default function JobsPage() {
   const [query, setQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [workMode, setWorkMode] = useState('');
+  const [category, setCategory] = useState('');
+  const [categories, setCategories] = useState<{ name: string; count: number }[]>([]);
   const [page, setPage] = useState(0);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [detail, setDetail] = useState<JobDetail | null>(null);
@@ -109,6 +111,7 @@ export default function JobsPage() {
       const params = new URLSearchParams();
       if (query) params.set('q', query);
       if (workMode) params.set('work_mode', workMode);
+      if (category) params.set('category', category);
       params.set('offset', String(page * PAGE_SIZE));
       params.set('limit', String(PAGE_SIZE));
       try {
@@ -133,7 +136,23 @@ export default function JobsPage() {
     return () => {
       cancelled = true;
     };
-  }, [query, workMode, page]);
+  }, [query, workMode, category, page]);
+
+  // Load category options once (top categories among active jobs)
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/jobs/categories')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data?.categories)) setCategories(data.categories);
+      })
+      .catch(() => {
+        // 选项加载失败不影响列表主功能
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load detail when selection changes
   useEffect(() => {
@@ -206,6 +225,12 @@ export default function JobsPage() {
     setSelectedJobId(null);
   }
 
+  function handleCategoryChange(next: string) {
+    setCategory(next);
+    setPage(0);
+    setSelectedJobId(null);
+  }
+
   function renderTitle(d: JobDetail) {
     const original = d.title_original || 'Unknown';
     const zh = d.title_zh;
@@ -265,6 +290,21 @@ export default function JobsPage() {
                 {WORK_MODE_LABELS[mode]}
               </button>
             ))}
+            {categories.length > 0 && (
+              <select
+                className={`jh-filter-select${category ? ' active' : ''}`}
+                value={category}
+                onChange={(e) => handleCategoryChange(e.target.value)}
+                aria-label="按类别筛选"
+              >
+                <option value="">全部类别</option>
+                {categories.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.name} ({c.count})
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 

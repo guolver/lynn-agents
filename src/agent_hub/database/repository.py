@@ -13,7 +13,7 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from agent_hub.database.models import (
@@ -332,10 +332,11 @@ class PostgresRepository:
         self,
         q: str | None = None,
         work_mode: str | None = None,
+        category: str | None = None,
         offset: int = 0,
         limit: int = 20,
     ) -> tuple[int, list[dict[str, Any]]]:
-        """Search jobs with keyword and work_mode filtering using SQL-level filters."""
+        """Search jobs with keyword, work_mode and category filtering using SQL-level filters."""
         session = self._session()
         owns_session = not self._is_context_session()
         try:
@@ -347,6 +348,8 @@ class PostgresRepository:
                 )
             if work_mode:
                 stmt = stmt.where(Job.payload["work_mode"].astext == work_mode)
+            if category:
+                stmt = stmt.where(func.jsonb_exists(Job.payload["categories"], category))
             count_stmt = select(text("count(*)")).select_from(stmt.subquery())
             total = session.execute(count_stmt).scalar() or 0
             rows = (
@@ -355,6 +358,26 @@ class PostgresRepository:
                 .all()
             )
             return int(total), [self._row_to_dict(row, "job") for row in rows]
+        finally:
+            if owns_session:
+                session.close()
+
+    def list_job_categories(self, limit: int = 30) -> list[dict[str, Any]]:
+        """活跃职位的类别聚合（按数量降序），用于筛选器选项。"""
+        session = self._session()
+        owns_session = not self._is_context_session()
+        try:
+            rows = session.execute(
+                text(
+                    "SELECT cat AS name, count(*) AS count "
+                    "FROM jobs, jsonb_array_elements_text("
+                    "  COALESCE(payload->'categories', '[]'::jsonb)) AS cat "
+                    "WHERE status = 'active' "
+                    "GROUP BY cat ORDER BY count DESC, cat LIMIT :limit"
+                ),
+                {"limit": limit},
+            ).all()
+            return [{"name": row.name, "count": int(row.count)} for row in rows]
         finally:
             if owns_session:
                 session.close()
