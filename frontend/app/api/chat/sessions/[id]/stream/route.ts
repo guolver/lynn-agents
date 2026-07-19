@@ -2,20 +2,17 @@ import { NextRequest } from 'next/server';
 
 const API_URL = process.env.AGENT_HUB_API_URL ?? 'http://127.0.0.1:8000';
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+// 恢复进行中的回答：后端有活跃流则重放 + 续传 SSE，否则 204。
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const body = await request.json();
-
   try {
-    // 不设整体超时：SSE 流的时长由生成决定；客户端断开时跟随中止（生成端不受影响，
-    // 可通过 GET /stream 重连续传）。
-    const response = await fetch(`${API_URL}/api/v1/chat/sessions/${id}/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const response = await fetch(`${API_URL}/api/v1/chat/sessions/${id}/stream`, {
       signal: request.signal,
     });
 
+    if (response.status === 204) {
+      return new Response(null, { status: 204 });
+    }
     if (!response.ok) {
       return new Response(await response.text(), {
         status: response.status,
@@ -23,7 +20,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       });
     }
 
-    // Stream-through the SSE response
     return new Response(response.body, {
       status: 200,
       headers: {

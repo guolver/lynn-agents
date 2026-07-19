@@ -742,25 +742,51 @@ def delete_chat_session(session_id: str, request: Request):
     return {"ok": True}
 
 
+def _sse_response(events):
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    def event_stream():
+        for event in events:
+            event_type = event["event"]
+            event_data = _json.dumps(event["data"], ensure_ascii=False, default=str)
+            yield f"event: {event_type}\ndata: {event_data}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.post("/chat/sessions/{session_id}/messages")
 def send_chat_message(
     session_id: str,
     body: ChatMessageRequest,
     request: Request,
 ):
-    import json as _json
-
-    from fastapi.responses import StreamingResponse
-
     chat_svc = request.app.state.chat_service
+    hub = getattr(request.app.state, "stream_hub", None)
 
-    def event_stream():
-        for event in chat_svc.stream_response(session_id, body.content):
-            event_type = event["event"]
-            event_data = _json.dumps(event["data"], ensure_ascii=False, default=str)
-            yield f"event: {event_type}\ndata: {event_data}\n\n"
+    # 生成与连接解耦：后台线程写 StreamHub，本响应只是其中一个消费者。
+    # 客户端断开（切页面、刷新）不影响生成，且可通过 GET /stream 重连续传。
+    if hub is not None and hub.available():
+        stream_id = chat_svc.start_streaming(session_id, body.content, hub)
+        return _sse_response(hub.replay_and_follow(stream_id))
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    # Redis 不可用时退回原地流式（无恢复能力）。
+    return _sse_response(chat_svc.stream_response(session_id, body.content))
+
+
+@router.get("/chat/sessions/{session_id}/stream")
+def resume_chat_stream(session_id: str, request: Request):
+    """重连进行中的回答：从头重放已生成部分并继续跟读；无活跃流返回 204。"""
+    from fastapi import Response
+
+    hub = getattr(request.app.state, "stream_hub", None)
+    if hub is None or not hub.available():
+        return Response(status_code=204)
+    stream_id = hub.get_active(session_id)
+    if not stream_id:
+        return Response(status_code=204)
+    return _sse_response(hub.replay_and_follow(stream_id))
 
 
 @router.post("/chat/sessions/{session_id}/upload", status_code=201)
@@ -793,7 +819,18 @@ def upload_chat_resume(
         return JSONResponse(status_code=422, content={"detail": "无法从 PDF 中提取文本"})
 
     # Store extracted text as user message for LLM context / later reference.
-    chat_svc.add_message(session_id, "user", f"[简历内容]\n{text}")
+    # Attachment metadata lets the frontend rebuild the file card on history replay
+    # instead of dumping the raw resume text.
+    chat_svc.add_message(
+        session_id,
+        "user",
+        f"[简历内容]\n{text}",
+        attachment={
+            "name": file.filename,
+            "size": len(pdf_bytes),
+            "type": file.content_type or "application/pdf",
+        },
+    )
 
     # Celery 可用时：异步跑「解析 + 匹配」流水线，立刻返回 task_id 供前端轮询。
     if _celery_available(request):

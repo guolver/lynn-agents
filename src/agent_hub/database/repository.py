@@ -110,6 +110,7 @@ _TYPED_COLUMNS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
         "content": p.get("content", ""),
         "tool_calls": p.get("tool_calls"),
         "tool_call_id": p.get("tool_call_id"),
+        "attachment": p.get("attachment"),
     },
 }
 
@@ -268,6 +269,7 @@ class PostgresRepository:
                     "content": row.content,
                     "tool_calls": row.tool_calls,
                     "tool_call_id": row.tool_call_id,
+                    "attachment": row.attachment,
                     "created_at": row.created_at.isoformat() if row.created_at else "",
                 }
                 for row in rows

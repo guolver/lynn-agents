@@ -28,6 +28,8 @@ EXPECTED_TABLES = {
     "feedback",
     "audit_logs",
     "idempotency_records",
+    "chat_sessions",
+    "chat_messages",
 }
 
 

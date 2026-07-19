@@ -99,18 +99,23 @@ export function ChatMessage({
           {matchCards && (
             <div className="chat-msg-matches">
               {matchCards.map((m, i) => (
-                <MatchCard
-                  key={i}
-                  title={m.job_title ?? 'Unknown'}
-                  company={m.company_name ?? ''}
-                  score={m.score ?? 0}
-                  reasons={m.reasons ?? []}
-                  workMode={m.work_mode}
-                  compensation={
-                    m.compensation_max ? `$${m.compensation_max}/h ${m.compensation_currency ?? ''}` : undefined
-                  }
-                  onClick={m.job_id && onCardClick ? () => onCardClick(m.job_id!) : undefined}
-                />
+                <div className="chat-match-item" key={i}>
+                  <div className="chat-match-reason">
+                    <span className="chat-match-reason-icon">💡</span>
+                    {(m.reasons?.length ? m.reasons : ['综合技能与偏好的整体匹配推荐']).join('；')}
+                  </div>
+                  <MatchCard
+                    title={m.job_title ?? 'Unknown'}
+                    company={m.company_name ?? ''}
+                    score={m.score ?? 0}
+                    reasons={[]}
+                    workMode={m.work_mode}
+                    compensation={
+                      m.compensation_max ? `$${m.compensation_max}/h ${m.compensation_currency ?? ''}` : undefined
+                    }
+                    onClick={m.job_id && onCardClick ? () => onCardClick(m.job_id!) : undefined}
+                  />
+                </div>
               ))}
             </div>
           )}

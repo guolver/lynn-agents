@@ -97,6 +97,7 @@ class ChatService:
         content: str,
         tool_calls: list[dict] | None = None,
         tool_call_id: str | None = None,
+        attachment: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         msg = {
             "id": str(uuid.uuid4()),
@@ -108,6 +109,8 @@ class ChatService:
             msg["tool_calls"] = tool_calls
         if tool_call_id is not None:
             msg["tool_call_id"] = tool_call_id
+        if attachment is not None:
+            msg["attachment"] = attachment
         self.repo.put("chat_message", msg)
         return msg
 
@@ -153,14 +156,31 @@ class ChatService:
                 "你可以调整偏好（薪资、地区、工作模式）后再试。"
             )
 
-        assistant_msg = self.add_message(session_id, "assistant", summary)
+        # Persist a valid assistant(tool_calls) + tool pair so replaying history
+        # to the LLM satisfies the OpenAI protocol (tool must answer tool_calls).
+        call_id = f"chat_match_{uuid.uuid4().hex}"
+        assistant_msg = self.add_message(
+            session_id,
+            "assistant",
+            summary,
+            tool_calls=[
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": "run_matches",
+                        "arguments": json.dumps({"candidate_id": candidate_id, "limit": limit}),
+                    },
+                }
+            ],
+        )
         self.add_message(
             session_id,
             "tool",
             json.dumps(
                 {"name": "run_matches", "result": match_result}, ensure_ascii=False, default=str
             ),
-            tool_call_id=f"chat_match_{assistant_msg['id']}",
+            tool_call_id=call_id,
         )
 
         return {
@@ -188,7 +208,7 @@ class ChatService:
         # Keep last N messages to stay within context window
         history = history[-MAX_HISTORY_MESSAGES:]
 
-        for msg in history:
+        for msg in self._sanitize_history(history):
             entry: dict[str, Any] = {"role": msg["role"], "content": msg["content"]}
             if msg.get("tool_calls"):
                 entry["tool_calls"] = msg["tool_calls"]
@@ -197,6 +217,78 @@ class ChatService:
             messages.append(entry)
 
         return messages
+
+    @staticmethod
+    def _sanitize_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Drop tool messages that don't answer a preceding assistant tool_calls.
+
+        The OpenAI protocol rejects the whole request if a "tool" message is not
+        an immediate response to an assistant message carrying matching
+        tool_calls. Orphans appear when the history window truncation splits a
+        pair, or from legacy rows persisted without tool_calls. Assistant
+        tool_calls left unanswered (e.g. interrupted stream) are stripped for
+        the same reason.
+        """
+        result: list[dict[str, Any]] = []
+        i = 0
+        while i < len(history):
+            msg = history[i]
+            role = msg["role"]
+            if role == "tool":
+                i += 1  # orphan tool message
+                continue
+            if role == "assistant" and msg.get("tool_calls"):
+                call_ids = {tc["id"] for tc in msg["tool_calls"]}
+                j = i + 1
+                responses = []
+                while (
+                    j < len(history)
+                    and history[j]["role"] == "tool"
+                    and history[j].get("tool_call_id") in call_ids
+                ):
+                    responses.append(history[j])
+                    j += 1
+                if len(responses) == len(call_ids):
+                    result.append(msg)
+                    result.extend(responses)
+                elif msg.get("content"):
+                    stripped = {k: v for k, v in msg.items() if k != "tool_calls"}
+                    result.append(stripped)
+                i = j
+                continue
+            result.append(msg)
+            i += 1
+        return result
+
+    def start_streaming(self, session_id: str, user_message: str, hub: Any) -> str:
+        """把生成任务与 HTTP 连接解耦：后台线程跑 stream_response 并发布到 hub。
+
+        返回 stream_id。客户端（包括断开后重连的）通过 hub.replay_and_follow
+        消费；连接断开不影响生成，消息照常落库。
+        """
+        import threading
+
+        stream_id = str(uuid.uuid4())
+        hub.set_active(session_id, stream_id)
+
+        def run() -> None:
+            terminal_seen = False
+            try:
+                for event in self.stream_response(session_id, user_message):
+                    hub.publish(stream_id, event["event"], event["data"])
+                    if event["event"] in ("done", "error"):
+                        terminal_seen = True
+            except Exception as exc:  # noqa: BLE001 - stream must always terminate
+                logger.exception("chat stream generation failed")
+                hub.publish(stream_id, "error", {"detail": f"生成中断: {exc}"})
+                terminal_seen = True
+            finally:
+                if not terminal_seen:
+                    hub.publish(stream_id, "done", {})
+                hub.clear_active(session_id)
+
+        threading.Thread(target=run, daemon=True, name=f"chat-stream-{stream_id[:8]}").start()
+        return stream_id
 
     def stream_response(
         self,

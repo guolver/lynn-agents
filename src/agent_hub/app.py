@@ -95,6 +95,28 @@ def create_app(
 
     chat_service = ChatService(service=part_time_service, repo=repo)
 
+    # --- Chat stream hub (Redis Streams; enables resumable chat streaming) ---
+    stream_hub = None
+    stream_redis_url = (
+        os.getenv("CHAT_STREAM_REDIS_URL")
+        or os.getenv("CELERY_BROKER_URL")
+        or "redis://localhost:6379/0"
+    )
+    try:
+        from .agents.global_part_time.stream_hub import StreamHub
+
+        stream_hub = StreamHub(stream_redis_url)
+        if stream_hub.available():
+            logger.info("Chat StreamHub initialized at %s", stream_redis_url)
+        else:
+            logger.warning(
+                "Redis unreachable at %s; chat streaming falls back to inline (non-resumable)",
+                stream_redis_url,
+            )
+    except Exception:
+        logger.warning("Failed to initialize chat StreamHub", exc_info=True)
+        stream_hub = None
+
     registry = AgentRegistry()
     registry.register(GlobalPartTimeAgent(part_time_service, repo))
     for agent in extra_agents:
@@ -145,6 +167,7 @@ def create_app(
     if celery_instance is not None:
         application.state.celery_app = celery_instance
     application.state.chat_service = chat_service
+    application.state.stream_hub = stream_hub
     application.include_router(create_platform_router(registry))
     application.include_router(http_api.router)
     if skill_graph_router is not None:

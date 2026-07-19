@@ -502,6 +502,7 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    attachment: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

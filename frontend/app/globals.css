@@ -831,7 +831,7 @@ a {
 .chat-msg-matches {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
   margin-top: 12px;
 }
 
@@ -1114,6 +1114,23 @@ a {
   gap: 6px;
   flex-wrap: wrap;
   margin-top: 8px;
+}
+
+.chat-match-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-match-reason {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  padding-left: 2px;
+}
+
+.chat-match-reason-icon {
+  margin-right: 4px;
 }
 
 .match-card-clickable {

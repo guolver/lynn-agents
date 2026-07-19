@@ -94,47 +94,111 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const initialFired = useRef(false);
 
-  // Load history on mount. Tool messages carrying run_matches results are not
-  // rendered directly; instead their match cards are re-attached to the
-  // preceding assistant message so cards survive a page refresh.
-  useEffect(() => {
-    fetch(`/api/chat/sessions/${sessionId}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!Array.isArray(data.messages)) return;
-        const rebuilt: Message[] = [];
-        for (const m of data.messages as Array<Record<string, unknown>>) {
-          if (m.role === 'tool') {
-            try {
-              const parsed = JSON.parse(m.content as string);
-              const matches = parsed?.result?.matches;
-              if (parsed?.name === 'run_matches' && Array.isArray(matches) && matches.length) {
-                for (let i = rebuilt.length - 1; i >= 0; i--) {
-                  if (rebuilt[i].role === 'assistant') {
-                    rebuilt[i] = { ...rebuilt[i], toolData: { name: 'run_matches', result: { matches } } };
-                    break;
-                  }
+  // Rebuild renderable messages from persisted history. Tool messages carrying
+  // run_matches results are not rendered directly; instead their match cards
+  // are re-attached to the preceding assistant message so cards survive a
+  // page refresh.
+  async function fetchHistory(): Promise<Message[] | null> {
+    try {
+      const data = await fetch(`/api/chat/sessions/${sessionId}`).then((r) => r.json());
+      if (!Array.isArray(data.messages)) return null;
+      const rebuilt: Message[] = [];
+      for (const m of data.messages as Array<Record<string, unknown>>) {
+        if (m.role === 'tool') {
+          try {
+            const parsed = JSON.parse(m.content as string);
+            const matches = parsed?.result?.matches;
+            if (parsed?.name === 'run_matches' && Array.isArray(matches) && matches.length) {
+              for (let i = rebuilt.length - 1; i >= 0; i--) {
+                if (rebuilt[i].role === 'assistant') {
+                  rebuilt[i] = { ...rebuilt[i], toolData: { name: 'run_matches', result: { matches } } };
+                  break;
                 }
               }
-            } catch {
-              // ignore malformed tool payloads
             }
-            continue;
+          } catch {
+            // ignore malformed tool payloads
           }
+          continue;
+        }
+        const content = (m.content as string) ?? '';
+        const attachment = m.attachment as FileData | undefined;
+        if (m.role === 'user' && attachment) {
+          // Resume uploads: show the file card, not the raw extracted text.
+          rebuilt.push({
+            id: m.id as string,
+            role: 'user',
+            content: '',
+            fileData: attachment,
+          });
+        } else if (m.role === 'user' && content.startsWith('[简历内容]')) {
+          // Legacy uploads persisted before attachment metadata existed.
+          rebuilt.push({
+            id: m.id as string,
+            role: 'user',
+            content: '',
+            fileData: { name: '简历附件（PDF）', size: 0, type: 'application/pdf' },
+          });
+        } else {
           rebuilt.push({
             id: m.id as string,
             role: m.role as Message['role'],
-            content: m.content as string,
+            content,
           });
         }
-        setMessages(rebuilt);
-        if (rebuilt.length === 0 && !initialFired.current) {
-          initialFired.current = true;
-          if (initialPrompt) sendPrompt(initialPrompt);
-          else if (initialAction === 'upload') fileInputRef.current?.click();
+      }
+      return rebuilt;
+    } catch {
+      return null;
+    }
+  }
+
+  // Re-attach to an in-progress answer after remount (session switch, page
+  // navigation, refresh). The backend replays generated-so-far events and
+  // keeps following; 204 means no active stream.
+  async function resumeActiveStream(history: Message[]) {
+    try {
+      const res = await fetch(`/api/chat/sessions/${sessionId}/stream`);
+      if (res.status === 204) {
+        // The stream may have completed between the history fetch and now —
+        // the persisted answer would be missing from our snapshot.
+        if (history[history.length - 1]?.role === 'user') {
+          setTimeout(() => {
+            fetchHistory().then((again) => {
+              if (again) setMessages(again);
+            });
+          }, 800);
         }
-      })
-      .catch(() => {});
+        return;
+      }
+      if (!res.ok || !res.body) return;
+      setIsStreaming(true);
+      const assistantId = crypto.randomUUID();
+      setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
+      try {
+        await readSSE(res.body, applyStreamEvent(assistantId));
+        await typingSettled();
+      } finally {
+        setIsStreaming(false);
+      }
+    } catch {
+      flushTyping();
+      // resume is best-effort; history is already rendered
+    }
+  }
+
+  useEffect(() => {
+    fetchHistory().then((rebuilt) => {
+      if (!rebuilt) return;
+      setMessages(rebuilt);
+      if (rebuilt.length === 0 && !initialFired.current) {
+        initialFired.current = true;
+        if (initialPrompt) sendPrompt(initialPrompt);
+        else if (initialAction === 'upload') fileInputRef.current?.click();
+        return;
+      }
+      resumeActiveStream(rebuilt);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
@@ -150,6 +214,120 @@ export function ChatPanel({
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
     }
   }, [input]);
+
+  // Client-side typewriter: network delivery is bursty (LLM multi-char deltas,
+  // Redis batch reads, TCP/proxy coalescing, React batching), so deltas go into
+  // a buffer that a timer drains at a steady pace. Large backlogs (e.g. resume
+  // replay) drain at an accelerated rate to catch up, then settle into typing.
+  const typingRef = useRef<{
+    msgId: string | null;
+    buffer: string;
+    timer: ReturnType<typeof setInterval> | null;
+  }>({ msgId: null, buffer: '', timer: null });
+
+  function drainTyping() {
+    const t = typingRef.current;
+    if (!t.msgId || !t.buffer) {
+      if (t.timer) {
+        clearInterval(t.timer);
+        t.timer = null;
+      }
+      return;
+    }
+    const backlog = t.buffer.length;
+    const n = backlog > 200 ? Math.ceil(backlog / 40) : backlog > 40 ? 3 : 1;
+    const chunk = t.buffer.slice(0, n);
+    t.buffer = t.buffer.slice(n);
+    const id = t.msgId;
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: m.content + chunk } : m)));
+  }
+
+  function enqueueTyping(assistantId: string, text: string) {
+    const t = typingRef.current;
+    if (t.msgId !== assistantId) {
+      flushTyping();
+      t.msgId = assistantId;
+    }
+    t.buffer += text;
+    if (!t.timer) t.timer = setInterval(drainTyping, 24);
+  }
+
+  function flushTyping() {
+    const t = typingRef.current;
+    if (t.timer) {
+      clearInterval(t.timer);
+      t.timer = null;
+    }
+    if (t.msgId && t.buffer) {
+      const id = t.msgId;
+      const rest = t.buffer;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, content: m.content + rest } : m)),
+      );
+    }
+    t.buffer = '';
+    t.msgId = null;
+  }
+
+  // Resolve once the buffer has finished typing out (cap 8s, then flush).
+  function typingSettled(): Promise<void> {
+    return new Promise((resolve) => {
+      const deadline = Date.now() + 8000;
+      const check = () => {
+        if (!typingRef.current.buffer) {
+          resolve();
+          return;
+        }
+        if (Date.now() > deadline) {
+          flushTyping();
+          resolve();
+          return;
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    });
+  }
+
+  useEffect(() => {
+    const t = typingRef.current;
+    return () => {
+      if (t.timer) clearInterval(t.timer);
+    };
+  }, []);
+
+  // Shared SSE event handler: used for both live sends and resumed streams.
+  function applyStreamEvent(assistantId: string) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (eventType: string, data: any) => {
+      if (eventType === 'delta') {
+        enqueueTyping(assistantId, data.content);
+      } else if (eventType === 'tool_call') {
+        flushTyping();
+        setLastToolName(data.name);
+        const label = TOOL_LABELS[data.name] || 'Processing...';
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: m.content || label } : m)),
+        );
+      } else if (eventType === 'tool_result') {
+        if (data.name === 'run_matches' && data.result?.matches) {
+          flushTyping();
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: '', toolData: { name: data.name, result: data.result } }
+                : m,
+            ),
+          );
+        }
+      } else if (eventType === 'error') {
+        flushTyping();
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: `Error: ${data.detail}` } : m)),
+        );
+      }
+    };
+  }
 
   async function streamAssistant(text: string) {
     setIsStreaming(true);
@@ -173,35 +351,11 @@ export function ChatPanel({
       }
 
       if (response.body) {
-        await readSSE(response.body, (eventType, data) => {
-          if (eventType === 'delta') {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + data.content } : m)),
-            );
-          } else if (eventType === 'tool_call') {
-            setLastToolName(data.name);
-            const label = TOOL_LABELS[data.name] || 'Processing...';
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content || label } : m)),
-            );
-          } else if (eventType === 'tool_result') {
-            if (data.name === 'run_matches' && data.result?.matches) {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, content: '', toolData: { name: data.name, result: data.result } }
-                    : m,
-                ),
-              );
-            }
-          } else if (eventType === 'error') {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: `Error: ${data.detail}` } : m)),
-            );
-          }
-        });
+        await readSSE(response.body, applyStreamEvent(assistantId));
+        await typingSettled();
       }
     } catch {
+      flushTyping();
       setMessages((prev) =>
         prev.map((m) => (m.id === assistantId ? { ...m, content: '网络错误，请重试。' } : m)),
       );
