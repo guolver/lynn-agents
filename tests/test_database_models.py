@@ -33,6 +33,8 @@ EXPECTED_TABLES = {
     "chat_messages",
     "workflow_commands",
     "workflow_command_payloads",
+    "users",
+    "refresh_tokens",
 }
 
 TENANT_TABLES = {
@@ -67,6 +69,7 @@ class DatabaseModelTest(unittest.TestCase):
             "notifications": {("provider_message_id",)},
             "idempotency_records": {("tenant_id", "action", "key")},
             "workflow_commands": {("tenant_id", "action", "idempotency_key")},
+            "users": {("tenant_id", "email")},
         }
         for table_name, required in expected.items():
             table = Base.metadata.tables[table_name]
@@ -96,6 +99,7 @@ class DatabaseModelTest(unittest.TestCase):
             "workflow_steps": {"workflow_run_id"},
             "notifications": {"candidate_id"},
             "feedback": {"match_id", "candidate_id"},
+            "refresh_tokens": {"user_id"},
         }
         for table_name, required_columns in expected.items():
             table = Base.metadata.tables[table_name]
@@ -175,6 +179,18 @@ class DatabaseModelTest(unittest.TestCase):
         self.assertIsInstance(table.c.expires_at.type, DateTime)
         self.assertTrue(table.c.expires_at.type.timezone)
         self.assertFalse(table.c.expires_at.nullable)
+
+    def test_users_table_has_tenant_scoped_non_nullable_columns(self):
+        table = Base.metadata.tables["users"]
+        for column_name in ("tenant_id", "email", "password_hash", "roles"):
+            self.assertFalse(table.c[column_name].nullable)
+        self.assertFalse(table.c.email_verified.nullable)
+
+    def test_refresh_tokens_table_has_revocation_columns(self):
+        table = Base.metadata.tables["refresh_tokens"]
+        for column_name in ("user_id", "tenant_id", "token_hash", "expires_at"):
+            self.assertFalse(table.c[column_name].nullable)
+        self.assertTrue(table.c.revoked_at.nullable)
 
 
 if __name__ == "__main__":
