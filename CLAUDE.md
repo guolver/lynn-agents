@@ -12,7 +12,7 @@ Browser / API Client
   localhost:8000
         │
         ▼
-  SQLite (data/agent.db)    ← 默认数据库
+  PostgreSQL + pgvector     ← 默认数据库
 
   Next.js (frontend/)       ← 前端：可视化管控台
   localhost:3000

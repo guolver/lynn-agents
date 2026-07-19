@@ -25,7 +25,7 @@ class PayloadFactoryTest(unittest.TestCase):
 
 
 class RepositoryContractMixin:
-    """Contract reusable by SQLite and future PostgreSQL repositories."""
+    """Contract shared by the in-memory fake and the PostgreSQL repository."""
 
     repository: Any
 

@@ -267,7 +267,7 @@ class ServiceWorkflowTest(unittest.TestCase):
 
 
 class FakeVectorRepo(Repository):
-    """SQLite 仓储 + 假 pgvector 检索接口，用于验证召回路径。"""
+    """内存仓储 + 假 pgvector 检索接口，用于验证召回路径。"""
 
     def __init__(self):
         super().__init__(":memory:")
