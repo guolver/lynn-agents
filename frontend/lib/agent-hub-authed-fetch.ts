@@ -1,5 +1,11 @@
 import { cookies } from 'next/headers';
-import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE, accessTokenCookieOptions, refreshTokenCookieOptions } from './auth-cookies';
+import {
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  accessTokenCookieOptions,
+  expiredCookieOptions,
+  refreshTokenCookieOptions,
+} from './auth-cookies';
 
 const API_URL = process.env.AGENT_HUB_API_URL ?? 'http://127.0.0.1:8000';
 
@@ -52,10 +58,18 @@ export async function callAgentHub(path: string, init: RequestInit = {}): Promis
   if (first.status !== 401) return first;
 
   const refreshToken = cookieStore.get(REFRESH_TOKEN_COOKIE)?.value;
-  if (!refreshToken) throw new UnauthenticatedError();
+  if (!refreshToken) {
+    cookieStore.set(ACCESS_TOKEN_COOKIE, '', expiredCookieOptions());
+    cookieStore.set(REFRESH_TOKEN_COOKIE, '', expiredCookieOptions());
+    throw new UnauthenticatedError();
+  }
 
   const refreshed = await refreshTokens(refreshToken);
-  if (!refreshed) throw new UnauthenticatedError();
+  if (!refreshed) {
+    cookieStore.set(ACCESS_TOKEN_COOKIE, '', expiredCookieOptions());
+    cookieStore.set(REFRESH_TOKEN_COOKIE, '', expiredCookieOptions());
+    throw new UnauthenticatedError();
+  }
 
   cookieStore.set(ACCESS_TOKEN_COOKIE, refreshed.access_token, accessTokenCookieOptions(refreshed.expires_in));
   cookieStore.set(REFRESH_TOKEN_COOKIE, refreshed.refresh_token, refreshTokenCookieOptions());
