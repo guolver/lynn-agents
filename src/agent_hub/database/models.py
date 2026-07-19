@@ -478,6 +478,7 @@ class ChatSession(Base):
     candidate_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("candidates.id"), nullable=True
     )
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     actor: Mapped[str] = mapped_column(String(100), nullable=False, default="anonymous")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(
