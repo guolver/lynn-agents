@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from agent_hub.agents.global_part_time.repository import Repository
 from tests.factories import candidate_payload, job_payload, source_payload
+from tests.inmemory_repo import InMemoryRepository
 
 
 class PayloadFactoryTest(unittest.TestCase):
@@ -101,9 +101,9 @@ class RepositoryContractMixin:
         self.assertEqual(calls, 1)
 
 
-class SQLiteRepositoryContractTest(RepositoryContractMixin, unittest.TestCase):
-    def create_repository(self) -> Repository:
-        return Repository(":memory:")
+class InMemoryRepositoryContractTest(RepositoryContractMixin, unittest.TestCase):
+    def create_repository(self) -> InMemoryRepository:
+        return InMemoryRepository(":memory:")
 
 
 if __name__ == "__main__":
