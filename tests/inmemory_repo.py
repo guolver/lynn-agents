@@ -125,6 +125,16 @@ class _TenantInMemoryRepository:
         return session_id in session
 
     def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]:
+        # No equivalent to PostgresRepository's cross-tenant id-collision
+        # guard is needed here, by construction rather than by choice:
+        # storage is nested tenant -> kind -> id, so `self._root._entities`
+        # only ever exposes this tenant's own bucket. A `put()` from a
+        # different tenant scope with the same id writes into that OTHER
+        # tenant's bucket, never touching or overwriting this one — there is
+        # no shared `id` keyspace across tenants to collide on, unlike
+        # Postgres where `id` is a single global primary key per kind. If
+        # this file is ever refactored to share a flat id-keyed store across
+        # tenants, this guard would need to be added back.
         if kind == "chat_message" and not self._chat_session_belongs_to_tenant(
             item.get("session_id")
         ):

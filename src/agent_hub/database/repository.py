@@ -152,6 +152,22 @@ class PostgresRepository:
         owning = session.get(ChatSession, session_id)
         return owning is not None and owning.tenant_id == tenant_id
 
+    def _owned_by(self, row: Any, model_cls: type, tenant_id: str) -> bool:
+        """True if *row* may be read/written under tenant scope *tenant_id*.
+
+        Kinds whose model has no ``tenant_id`` column (currently only
+        ``chat_message``) aren't gated here — they're handled separately via
+        :meth:`_chat_session_belongs_to_tenant`. For every other kind, all of
+        ``_put``/``_get``/``_delete`` must reject access to a row that already
+        belongs to a *different* tenant: without this, a scoped repo could
+        silently overwrite (put), read (get), or remove (delete) another
+        tenant's row just by reusing its id — ids are a single global primary
+        key per kind, not composite with ``tenant_id``.
+        """
+        if not hasattr(model_cls, "tenant_id"):
+            return True
+        return row.tenant_id == tenant_id
+
     def _row_to_dict(self, row: Any, kind: str) -> dict[str, Any]:
         """Convert a model row to a dict, handling both payload and non-payload models."""
         if hasattr(row, "payload"):
@@ -224,6 +240,17 @@ class PostgresRepository:
                         return self._row_to_dict(existing, kind)
 
             row = session.get(model_cls, item["id"])
+            if (
+                row is not None
+                and tenant_id is not None
+                and not self._owned_by(row, model_cls, tenant_id)
+            ):
+                # The id belongs to another tenant's row — refuse to overwrite
+                # it instead of silently upserting across the tenant boundary.
+                raise AuthorizationError(
+                    f"entity {item['id']!r} of kind {kind!r} does not belong to tenant "
+                    f"{tenant_id!r}"
+                )
             if row is not None:
                 if has_payload:
                     row.payload = item
@@ -278,8 +305,7 @@ class PostgresRepository:
             if (
                 row is not None
                 and tenant_id is not None
-                and hasattr(model_cls, "tenant_id")
-                and row.tenant_id != tenant_id
+                and not self._owned_by(row, model_cls, tenant_id)
             ):
                 return None
             return self._row_to_dict(row, kind) if row else None
@@ -380,8 +406,7 @@ class PostgresRepository:
                 if (
                     row is not None
                     and tenant_id is not None
-                    and hasattr(model_cls, "tenant_id")
-                    and row.tenant_id != tenant_id
+                    and not self._owned_by(row, model_cls, tenant_id)
                 ):
                     row = None
             if row is not None:

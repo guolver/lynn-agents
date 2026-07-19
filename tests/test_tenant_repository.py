@@ -219,6 +219,79 @@ def test_for_tenant_rejects_none_or_empty_tenant_id(root_repo, bad_tenant_id):
 
 
 # ---------------------------------------------------------------------------
+# PostgreSQL-only: cross-tenant id-collision guard on put().
+#
+# InMemoryRepository cannot reproduce this scenario at all: its storage is
+# nested tenant -> kind -> id, so two tenants writing the same id land in
+# separate buckets and never collide (see the comment in
+# tests/inmemory_repo.py's _TenantInMemoryRepository.put). PostgresRepository
+# uses a single global `id` primary key per kind, so a tenant-scoped put()
+# must explicitly reject writes that would overwrite another tenant's row —
+# this guard, and therefore this test, is Postgres-only.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL not set")
+class TestPostgresCrossTenantIdCollisionGuard:
+    def setup_method(self):
+        self.repo = _make_postgres()
+
+    def test_put_is_rejected_when_candidate_id_belongs_to_another_tenant(self):
+        from agent_hub.core.contracts import AuthorizationError
+
+        acme = self.repo.for_tenant("acme")
+        beta = self.repo.for_tenant("beta")
+        acme.put("candidate", {"id": "c1", "country": "US", "timezone": "UTC"})
+
+        with pytest.raises(AuthorizationError):
+            beta.put("candidate", {"id": "c1", "country": "CA", "timezone": "PST"})
+
+        # acme's row must be provably unaffected by the rejected write.
+        preserved = acme.get("candidate", "c1")
+        assert preserved is not None
+        assert preserved["country"] == "US"
+        assert preserved["timezone"] == "UTC"
+        # beta must not have gained access to (or ownership of) acme's row.
+        assert beta.get("candidate", "c1") is None
+
+    def test_put_is_rejected_when_job_id_belongs_to_another_tenant(self):
+        from agent_hub.core.contracts import AuthorizationError
+
+        acme = self.repo.for_tenant("acme")
+        beta = self.repo.for_tenant("beta")
+        acme.put(
+            "job",
+            {
+                "id": "j1",
+                "source_id": "s1",
+                "dedup_key": "acme-key",
+                "title_original": "Acme Job",
+                "company_name": "Acme",
+                "status": "active",
+            },
+        )
+
+        with pytest.raises(AuthorizationError):
+            beta.put(
+                "job",
+                {
+                    "id": "j1",
+                    "source_id": "s1",
+                    "dedup_key": "beta-key",
+                    "title_original": "Beta Job",
+                    "company_name": "Beta",
+                    "status": "active",
+                },
+            )
+
+        preserved = acme.get("job", "j1")
+        assert preserved is not None
+        assert preserved["title_original"] == "Acme Job"
+        assert preserved["dedup_key"] == "acme-key"
+        assert beta.get("job", "j1") is None
+
+
+# ---------------------------------------------------------------------------
 # PostgreSQL-only: vector search and category aggregation, which InMemory does
 # not implement, but which the concrete Postgres wrapper must scope per the spec.
 # ---------------------------------------------------------------------------
