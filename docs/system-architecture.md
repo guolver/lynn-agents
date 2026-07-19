@@ -352,7 +352,6 @@ src/
 │           ├── http_api.py
 │           ├── repository.py
 │           └── service.py
-└── part_time_agent/              # 旧导入路径兼容层
 ```
 
 新增 Agent 的实现步骤和示例见 [接入新的 Agent](adding-agents.md)。兼职招聘业务的产品与规则设计见 [全球兼职职位匹配 Agent](global-part-time-agent.md)。
