@@ -100,3 +100,56 @@ class TestIdentityRepository(unittest.TestCase):
 
     def test_get_refresh_token_returns_none_when_missing(self):
         self.assertIsNone(self.repo.get_refresh_token("no-such-hash"))
+
+    def test_claim_refresh_token_returns_record_and_revokes_it(self):
+        user = self.repo.create_user(
+            tenant_id="default", email=self.email, password_hash="hash", roles="user"
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        self.repo.create_refresh_token(
+            user_id=user["id"],
+            tenant_id="default",
+            token_hash="claim-hash",
+            expires_at=expires_at,
+        )
+
+        claimed = self.repo.claim_refresh_token("claim-hash")
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed["user_id"], user["id"])
+
+        stored = self.repo.get_refresh_token("claim-hash")
+        self.assertIsNotNone(stored["revoked_at"])
+
+    def test_claim_refresh_token_returns_none_on_second_call(self):
+        user = self.repo.create_user(
+            tenant_id="default", email=self.email, password_hash="hash", roles="user"
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        self.repo.create_refresh_token(
+            user_id=user["id"],
+            tenant_id="default",
+            token_hash="claim-hash-2",
+            expires_at=expires_at,
+        )
+
+        first = self.repo.claim_refresh_token("claim-hash-2")
+        second = self.repo.claim_refresh_token("claim-hash-2")
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+
+    def test_claim_refresh_token_returns_none_for_expired_token(self):
+        user = self.repo.create_user(
+            tenant_id="default", email=self.email, password_hash="hash", roles="user"
+        )
+        expired_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        self.repo.create_refresh_token(
+            user_id=user["id"],
+            tenant_id="default",
+            token_hash="already-expired",
+            expires_at=expired_at,
+        )
+
+        self.assertIsNone(self.repo.claim_refresh_token("already-expired"))
+
+    def test_claim_refresh_token_returns_none_for_unknown_hash(self):
+        self.assertIsNone(self.repo.claim_refresh_token("no-such-hash-at-all"))

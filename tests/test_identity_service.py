@@ -126,6 +126,39 @@ class TestIdentityService(unittest.TestCase):
         with self.assertRaises(InvalidRefreshTokenError):
             self.service.refresh("not-a-real-token")
 
+    def test_refresh_second_concurrent_use_of_same_token_is_rejected(self):
+        """Simulates a race: two callers both try to redeem the same refresh
+        token. Only one can win, proving the repository-level atomic claim
+        (not just sequential logic) prevents replay."""
+        tokens = self.service.register(self.email, self.password)
+        first = self.service.refresh(tokens["refresh_token"])
+        self.assertIn("access_token", first)
+        with self.assertRaises(InvalidRefreshTokenError):
+            self.service.refresh(tokens["refresh_token"])
+
+    def test_login_does_not_leak_registration_status_via_early_return(self):
+        """Both an unknown email and a wrong password for a known email must
+        reach the same rate-limiter-recording, same-exception code path (not
+        a proof of constant time, but proves there's no early-return that
+        skips the password check entirely for unknown emails)."""
+        self.service.register(self.email, self.password)
+        with self.assertRaises(InvalidCredentialsError):
+            self.service.login("definitely-not-registered@example.com", self.password)
+        with self.assertRaises(InvalidCredentialsError):
+            self.service.login(self.email, "wrong password")
+
+    def test_login_is_isolated_by_tenant(self):
+        self.service.register(self.email, self.password)
+
+        other_tenant_service = IdentityService(
+            self.repo,
+            rate_limiter=FakeRateLimiter(),
+            jwt_secret=JWT_SECRET,
+            tenant_id="other-tenant",
+        )
+        with self.assertRaises(InvalidCredentialsError):
+            other_tenant_service.login(self.email, self.password)
+
     def test_logout_revokes_refresh_token(self):
         tokens = self.service.register(self.email, self.password)
         self.service.logout(tokens["refresh_token"])

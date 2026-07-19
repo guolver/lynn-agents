@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -122,6 +122,34 @@ class IdentityRepository:
             session.add(token)
             session.commit()
             return _refresh_token_to_dict(token)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def claim_refresh_token(self, token_hash: str) -> dict[str, Any] | None:
+        """Atomically revoke an unexpired, unrevoked refresh token and return it.
+
+        Uses a single conditional UPDATE (not a separate SELECT then UPDATE) so
+        two concurrent callers racing on the same token can't both observe it
+        as valid and both mint a new token pair — only one UPDATE can match
+        the ``revoked_at IS NULL`` condition and actually revoke the row.
+        """
+        session = self._session()
+        try:
+            row = session.execute(
+                update(RefreshToken)
+                .where(
+                    RefreshToken.token_hash == token_hash,
+                    RefreshToken.revoked_at.is_(None),
+                    RefreshToken.expires_at > _utcnow(),
+                )
+                .values(revoked_at=_utcnow())
+                .returning(RefreshToken)
+            ).scalar_one_or_none()
+            session.commit()
+            return _refresh_token_to_dict(row) if row else None
         except Exception:
             session.rollback()
             raise

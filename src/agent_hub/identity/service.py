@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .crypto import (
+    ACCESS_TOKEN_TTL,
     REFRESH_TOKEN_TTL,
     encode_access_token,
     hash_password,
@@ -24,7 +25,12 @@ from .domain import normalize_email, validate_email, validate_password
 from .rate_limiter import LoginRateLimiterProtocol
 from .repository import DuplicateEmailError, IdentityRepository
 
-ACCESS_TOKEN_TTL_SECONDS = 15 * 60
+ACCESS_TOKEN_TTL_SECONDS = int(ACCESS_TOKEN_TTL.total_seconds())
+
+# Precomputed once at import time so the timing-safety fix in login() doesn't
+# pay an extra argon2 hashing cost on every failed login for an unknown email
+# — verify_password() is called against this instead of skipping the call.
+_DUMMY_PASSWORD_HASH = hash_password("timing-safety-dummy-password-never-used-for-login")
 
 
 class EmailAlreadyRegisteredError(Exception):
@@ -83,7 +89,9 @@ class IdentityService:
             raise LoginRateLimitedError(email)
 
         user = self._repo.get_user_by_email(self._tenant_id, email)
-        if user is None or not verify_password(password, user["password_hash"]):
+        password_hash = user["password_hash"] if user is not None else _DUMMY_PASSWORD_HASH
+        password_ok = verify_password(password, password_hash)
+        if user is None or not password_ok:
             self._rate_limiter.record_failure(rate_key)
             raise InvalidCredentialsError()
 
@@ -91,11 +99,10 @@ class IdentityService:
         return self._issue_tokens(user)
 
     def refresh(self, refresh_token: str) -> dict[str, Any]:
-        record = self._repo.get_refresh_token(hash_refresh_token(refresh_token))
-        if record is None or record["revoked_at"] is not None or record["expires_at"] <= _utcnow():
+        record = self._repo.claim_refresh_token(hash_refresh_token(refresh_token))
+        if record is None:
             raise InvalidRefreshTokenError()
 
-        self._repo.revoke_refresh_token(record["id"])
         user = self._repo.get_user_by_id(record["user_id"])
         if user is None:
             raise InvalidRefreshTokenError()
