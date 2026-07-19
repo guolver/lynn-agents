@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from agent_hub.agents.global_part_time.fetchers.remoteok import fetch, map_job, strip_html
-from agent_hub.agents.global_part_time.repository import Repository
+from tests.inmemory_repo import InMemoryRepository as Repository
 from agent_hub.agents.global_part_time.service import AgentService
 
 

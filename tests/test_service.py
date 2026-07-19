@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from agent_hub.agents.global_part_time.repository import Repository
+from tests.inmemory_repo import InMemoryRepository as Repository
 from agent_hub.agents.global_part_time.service import AgentService, PolicyError
 from tests.factories import candidate_payload, job_payload, source_payload
 

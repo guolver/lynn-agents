@@ -49,7 +49,7 @@ docs/                             # 架构文档
 |---|------|
 | 后端 | Python 3.10+, FastAPI, Pydantic, Uvicorn |
 | 前端 | Next.js 16, React 19, Tailwind CSS 4, Drizzle ORM |
-| 数据库 | PostgreSQL + pgvector（compose 默认）/ SQLite（本地裸跑 MVP） |
+| 数据库 | PostgreSQL + pgvector |
 | 部署 | Cloudflare Workers（前端） |
 
 ## 开发命令

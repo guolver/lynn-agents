@@ -1,13 +1,13 @@
 """Celery task tests using task.apply() — no Redis required.
 
-These tests use the in-memory SQLite repository (the default when no
-DATABASE_URL is set) and execute tasks synchronously via ``task.apply()``.
+These tests use the in-memory fake repository and execute tasks
+synchronously via ``task.apply()``.
 """
 
 import unittest
 from unittest.mock import patch
 
-from agent_hub.agents.global_part_time.repository import SQLiteRepository
+from tests.inmemory_repo import InMemoryRepository
 from agent_hub.agents.global_part_time.service import AgentService
 from agent_hub.worker.celery_app import celery_app
 from agent_hub.worker.errors import classify
@@ -30,8 +30,8 @@ celery_app.conf.update(
 
 
 def _make_service():
-    """Create a service with an in-memory SQLite repo."""
-    repo = SQLiteRepository(":memory:")
+    """Create a service with an in-memory fake repo."""
+    repo = InMemoryRepository()
     return AgentService(repo), repo
 
 
@@ -291,7 +291,7 @@ class TestRetryBehavior(unittest.TestCase):
 
 class EmbedJobsTest(unittest.TestCase):
     def test_skips_repo_without_vector_support(self):
-        repo = SQLiteRepository(":memory:")
+        repo = InMemoryRepository()
         result = _embed_jobs(repo, ["j1"])
         self.assertEqual(result["embedded"], 0)
         self.assertEqual(result["skipped"], "no_vector_support")

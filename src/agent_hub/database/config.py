@@ -1,30 +1,23 @@
-"""Repository factory: select SQLite or PostgreSQL based on configuration.
+"""Repository factory: PostgreSQL only.
 
-Selection order:
-1. Explicit ``database_url`` parameter
-2. ``DATABASE_URL`` environment variable
-3. Explicit ``sqlite_path`` parameter
-4. ``DATABASE_PATH`` environment variable
-5. ``./data/agent.db`` (default SQLite)
+``DATABASE_URL``（参数或环境变量）必须提供，形如
+``postgresql+psycopg://user:pass@host:5432/dbname``。
 """
 
 from __future__ import annotations
 
 import os
 
-from agent_hub.agents.global_part_time.repository import RepositoryProtocol, SQLiteRepository
+from agent_hub.agents.global_part_time.repository import RepositoryProtocol
 
 
-def create_repository(
-    database_url: str | None = None,
-    sqlite_path: str | None = None,
-) -> RepositoryProtocol:
-    """Return a configured repository instance."""
+def create_repository(database_url: str | None = None) -> RepositoryProtocol:
+    """Return a configured PostgreSQL repository instance."""
     url = database_url or os.environ.get("DATABASE_URL")
-    if url:
-        from agent_hub.database.repository import PostgresRepository
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL is required (e.g. postgresql+psycopg://agent_hub:agent_hub@localhost:5432/agent_hub)"
+        )
+    from agent_hub.database.repository import PostgresRepository
 
-        return PostgresRepository(url)
-
-    path = sqlite_path or os.environ.get("DATABASE_PATH", "./data/agent.db")
-    return SQLiteRepository(path)
+    return PostgresRepository(url)

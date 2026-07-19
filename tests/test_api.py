@@ -2,7 +2,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from agent_hub.agents.global_part_time.repository import Repository
+from tests.inmemory_repo import InMemoryRepository as Repository
 from agent_hub.app import create_app
 from tests.factories import job_payload, source_payload
 
