@@ -53,9 +53,8 @@ class SkillGraphService:
         """
         with self.driver.session() as session:
             result = session.run(
-                "OPTIONAL MATCH (s:Skill {name: $name})-[:ALIAS_OF]->(canonical:Skill) "
-                "WITH s, canonical "
-                "WHERE s IS NOT NULL "
+                "MATCH (s:Skill {name: $name}) "
+                "OPTIONAL MATCH (s)-[:ALIAS_OF]->(canonical:Skill) "
                 "RETURN coalesce(canonical.name, s.name) AS resolved",
                 name=name,
             )
