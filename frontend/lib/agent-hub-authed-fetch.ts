@@ -44,18 +44,22 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse | null
 
 /**
  * Proxies a request to the Agent Hub API with the caller's Bearer token.
- * On a 401 (expired access token), transparently refreshes once via the
- * refresh_token cookie and retries, rotating both cookies in the process.
- * Throws UnauthenticatedError when there is no session or refresh fails —
+ * If there's no access token cookie (it expired client-side — its maxAge
+ * matches the access token's own 15-minute TTL, so this is the routine case,
+ * not an edge case) or the backend rejects it with a 401, transparently
+ * refreshes once via the refresh_token cookie and retries, rotating both
+ * cookies in the process. Throws UnauthenticatedError when there is no
+ * session or refresh fails (and clears both cookies in that case) —
  * callers should catch this and return a 401 to the browser.
  */
 export async function callAgentHub(path: string, init: RequestInit = {}): Promise<Response> {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
-  if (!accessToken) throw new UnauthenticatedError();
 
-  const first = await fetchWithToken(path, init, accessToken);
-  if (first.status !== 401) return first;
+  if (accessToken) {
+    const first = await fetchWithToken(path, init, accessToken);
+    if (first.status !== 401) return first;
+  }
 
   const refreshToken = cookieStore.get(REFRESH_TOKEN_COOKIE)?.value;
   if (!refreshToken) {
