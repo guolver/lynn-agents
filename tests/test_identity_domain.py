@@ -46,3 +46,18 @@ def test_normalize_email_lowercases_and_strips_whitespace():
 def test_normalize_email_is_idempotent():
     normalized = normalize_email("Bob@Example.com")
     assert normalize_email(normalized) == normalized
+
+
+def test_validate_password_rejects_over_128_characters():
+    with pytest.raises(ValidationError):
+        validate_password("a" * 129)
+
+
+def test_validate_password_accepts_exactly_128_characters():
+    validate_password("a" * 128)  # must not raise
+
+
+def test_validate_email_rejects_over_255_characters():
+    long_local_part = "a" * 250
+    with pytest.raises(ValidationError):
+        validate_email(f"{long_local_part}@example.com")

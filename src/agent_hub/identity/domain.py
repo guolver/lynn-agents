@@ -11,7 +11,9 @@ from __future__ import annotations
 import re
 
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_MAX_EMAIL_LENGTH = 255
 _MIN_PASSWORD_LENGTH = 8
+_MAX_PASSWORD_LENGTH = 128
 
 
 class ValidationError(ValueError):
@@ -29,6 +31,8 @@ def normalize_email(email: str) -> str:
 
 
 def validate_email(email: str) -> None:
+    if len(email) > _MAX_EMAIL_LENGTH:
+        raise ValidationError(f"email must be at most {_MAX_EMAIL_LENGTH} characters")
     if not _EMAIL_PATTERN.match(email):
         raise ValidationError("invalid email format")
 
@@ -36,3 +40,5 @@ def validate_email(email: str) -> None:
 def validate_password(password: str) -> None:
     if len(password) < _MIN_PASSWORD_LENGTH:
         raise ValidationError(f"password must be at least {_MIN_PASSWORD_LENGTH} characters")
+    if len(password) > _MAX_PASSWORD_LENGTH:
+        raise ValidationError(f"password must be at most {_MAX_PASSWORD_LENGTH} characters")
