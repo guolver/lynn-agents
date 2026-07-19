@@ -33,6 +33,61 @@ class _TagStripper(HTMLParser):
         return " ".join(self._parts)
 
 
+_SAFE_TAGS = frozenset(
+    [
+        "p", "br", "strong", "b", "em", "i", "u",
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "ul", "ol", "li",
+        "a", "span", "div",
+        "table", "thead", "tbody", "tr", "th", "td",
+        "blockquote", "pre", "code", "hr",
+    ]
+)
+
+_SAFE_ATTRS = frozenset(["href", "target", "rel"])
+
+
+class _HtmlSanitizer(HTMLParser):
+    """Keep only safe structural HTML tags, strip scripts/styles/events."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip = 0  # depth inside unsafe tags like <script>/<style>
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("script", "style", "iframe", "object", "embed", "form"):
+            self._skip += 1
+            return
+        if self._skip:
+            return
+        if tag in _SAFE_TAGS:
+            safe_attrs = ""
+            if tag == "a":
+                filtered = [(k, v) for k, v in attrs if k in _SAFE_ATTRS and v]
+                if filtered:
+                    safe_attrs = " " + " ".join(f'{k}="{v}"' for k, v in filtered)
+                safe_attrs += ' rel="noopener noreferrer" target="_blank"'
+            self._parts.append(f"<{tag}{safe_attrs}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style", "iframe", "object", "embed", "form"):
+            self._skip = max(0, self._skip - 1)
+            return
+        if self._skip:
+            return
+        if tag in _SAFE_TAGS:
+            self._parts.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip:
+            return
+        self._parts.append(data)
+
+    def get_html(self) -> str:
+        return "".join(self._parts).strip()
+
+
 # Country name / city → ISO 3166-1 alpha-2 lookup.
 # Covers common values seen from RemoteOK and Remotive location fields.
 _COUNTRY_ALIASES: dict[str, str] = {
@@ -365,6 +420,15 @@ def strip_html(html: str) -> str:
     stripper.feed(html)
     text = stripper.get_text()
     return re.sub(r"\s+", " ", text).strip()
+
+
+def sanitize_html(html: str) -> str:
+    """Keep safe structural HTML tags, remove scripts/styles/event handlers."""
+    if not html:
+        return ""
+    sanitizer = _HtmlSanitizer()
+    sanitizer.feed(html)
+    return sanitizer.get_html()
 
 
 def get_fetcher(base_url: str) -> tuple[Callable, Callable] | None:

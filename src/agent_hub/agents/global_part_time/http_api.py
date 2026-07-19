@@ -336,6 +336,44 @@ def report_job(
     )
 
 
+@router.post("/jobs/{job_id}/translate")
+def translate_job_endpoint(
+    job_id: str,
+    repository: RepositoryDep,
+    service: ServiceDep,
+) -> dict[str, Any]:
+    """按需翻译岗位标题和描述为中文，结果缓存到 payload。"""
+    job = service.get_job(job_id)
+
+    # 已有翻译直接返回
+    if job.get("title_zh") and job.get("description_zh"):
+        return {"title_zh": job["title_zh"], "description_zh": job["description_zh"]}
+
+    # 调用翻译服务
+    try:
+        from .translator import translate_job
+    except ImportError as exc:
+        return JSONResponse(status_code=501, content={"detail": f"翻译依赖未安装: {exc}"})
+
+    try:
+        result = translate_job(
+            job.get("title_original", ""),
+            job.get("description_original", ""),
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=502, content={"detail": str(exc)})
+    except Exception as exc:
+        logging.getLogger(__name__).exception("translation failed")
+        return JSONResponse(status_code=502, content={"detail": f"翻译服务异常: {exc}"})
+
+    # 写回缓存
+    job["title_zh"] = result["title_zh"]
+    job["description_zh"] = result["description_zh"]
+    repository.put("job", job)
+
+    return {"title_zh": result["title_zh"], "description_zh": result["description_zh"]}
+
+
 @router.post("/candidates", status_code=201)
 def create_candidate(
     body: CandidateCreate,

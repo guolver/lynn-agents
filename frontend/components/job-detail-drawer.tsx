@@ -137,7 +137,10 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string; onClose: ()
               {(job.description_zh || job.description_original) && (
                 <div className="job-drawer-section">
                   <h3 className="job-drawer-label">Description</h3>
-                  <div className="job-drawer-desc">{job.description_zh || job.description_original}</div>
+                  <div
+                    className="job-drawer-desc"
+                    dangerouslySetInnerHTML={{ __html: job.description_zh || job.description_original || '' }}
+                  />
                 </div>
               )}
 

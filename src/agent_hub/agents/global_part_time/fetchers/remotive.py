@@ -6,7 +6,7 @@ import json
 import re
 from urllib.request import Request, urlopen
 
-from . import _SSL_CONTEXT, normalize_countries, strip_html
+from . import _SSL_CONTEXT, normalize_countries, sanitize_html, strip_html
 
 API_URL = "https://remotive.com/api/remote-jobs"
 USER_AGENT = "AgentHub/0.2 (+https://github.com/agent-hub)"
@@ -80,7 +80,7 @@ def map_job(raw: dict) -> dict:
         "title_original": raw.get("title", ""),
         "title_zh": None,
         "company_name": raw.get("company_name", ""),
-        "description_original": strip_html(raw.get("description", "")),
+        "description_original": sanitize_html(raw.get("description", "")),
         "description_zh": None,
         "employment_type": employment_type,
         "work_mode": "remote",

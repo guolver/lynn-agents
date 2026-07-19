@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 
-from . import _SSL_CONTEXT, normalize_countries, strip_html
+from . import _SSL_CONTEXT, normalize_countries, sanitize_html, strip_html
 
 # Re-export so existing imports (tests, etc.) keep working.
 __all__ = ["strip_html", "map_job", "fetch"]
@@ -39,7 +39,7 @@ def map_job(raw: dict) -> dict:
         "title_original": raw.get("position", ""),
         "title_zh": None,
         "company_name": raw.get("company", ""),
-        "description_original": strip_html(raw.get("description", "")),
+        "description_original": sanitize_html(raw.get("description", "")),
         "description_zh": None,
         "employment_type": "part_time",
         "work_mode": "remote",

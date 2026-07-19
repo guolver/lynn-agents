@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from . import _SSL_CONTEXT, normalize_countries, strip_html
+from . import _SSL_CONTEXT, normalize_countries, sanitize_html, strip_html
 
 __all__ = ["fetch", "map_job"]
 
@@ -80,7 +80,7 @@ def map_job(raw: dict) -> dict:
         "title_original": raw.get("jobTitle", ""),
         "title_zh": None,
         "company_name": raw.get("companyName", ""),
-        "description_original": strip_html(raw.get("jobDescription", "")),
+        "description_original": sanitize_html(raw.get("jobDescription", "")),
         "description_zh": None,
         "employment_type": employment_type,
         "work_mode": "remote",
