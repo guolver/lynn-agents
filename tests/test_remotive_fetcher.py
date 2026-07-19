@@ -74,8 +74,11 @@ class MapJobCompleteTest(unittest.TestCase):
     def test_company(self):
         self.assertEqual(self.result["company_name"], "Acme Corp")
 
-    def test_description_stripped(self):
-        self.assertEqual(self.result["description_original"], "Build APIs for our platform.")
+    def test_description_sanitized(self):
+        # sanitize_html 保留安全结构标签（前端富文本展示），不再压成纯文本
+        self.assertEqual(
+            self.result["description_original"], "<p>Build <b>APIs</b> for our platform.</p>"
+        )
 
     def test_skills(self):
         self.assertEqual(self.result["skills"], ["python", "react", "aws"])
@@ -84,7 +87,13 @@ class MapJobCompleteTest(unittest.TestCase):
         self.assertEqual(self.result["categories"], ["Software Development"])
 
     def test_location_split(self):
-        self.assertEqual(self.result["countries_allowed"], ["Americas", "Europe"])
+        # "Europe" 展开为 ISO 国家码；"Americas" 不在地区词表，按兜底规则计为 GLOBAL
+        result = self.result["countries_allowed"]
+        self.assertIn("DE", result)
+        self.assertIn("FR", result)
+        self.assertIn("GLOBAL", result)
+        self.assertNotIn("Europe", result)
+        self.assertNotIn("Americas", result)
 
     def test_work_mode_remote(self):
         self.assertEqual(self.result["work_mode"], "remote")
@@ -125,7 +134,7 @@ class MapJobLocationTest(unittest.TestCase):
 
     def test_single_location(self):
         raw = {**SAMPLE_RAW, "candidate_required_location": "USA"}
-        self.assertEqual(map_job(raw)["countries_allowed"], ["USA"])
+        self.assertEqual(map_job(raw)["countries_allowed"], ["US"])
 
 
 class MapJobCategoryFallbackTest(unittest.TestCase):

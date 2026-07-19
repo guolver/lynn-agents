@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from . import _SSL_CONTEXT, normalize_countries, sanitize_html, strip_html
+from . import _SSL_CONTEXT, normalize_countries, sanitize_html
 
 __all__ = ["fetch", "map_job"]
 

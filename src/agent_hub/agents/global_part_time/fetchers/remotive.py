@@ -6,7 +6,7 @@ import json
 import re
 from urllib.request import Request, urlopen
 
-from . import _SSL_CONTEXT, normalize_countries, sanitize_html, strip_html
+from . import _SSL_CONTEXT, normalize_countries, sanitize_html
 
 API_URL = "https://remotive.com/api/remote-jobs"
 USER_AGENT = "AgentHub/0.2 (+https://github.com/agent-hub)"

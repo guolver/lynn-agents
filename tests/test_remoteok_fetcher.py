@@ -70,8 +70,11 @@ class MapJobCompleteTest(unittest.TestCase):
     def test_company(self):
         self.assertEqual(self.result["company_name"], "Acme Corp")
 
-    def test_description_stripped(self):
-        self.assertEqual(self.result["description_original"], "Build APIs for our platform.")
+    def test_description_sanitized(self):
+        # sanitize_html 保留安全结构标签（前端富文本展示），不再压成纯文本
+        self.assertEqual(
+            self.result["description_original"], "<p>Build <b>APIs</b> for our platform.</p>"
+        )
 
     def test_skills(self):
         self.assertEqual(self.result["skills"], ["python", "api", "backend"])
@@ -132,7 +135,7 @@ class MapJobLocationTest(unittest.TestCase):
     def test_specific_location(self):
         raw = {**SAMPLE_RAW, "location": "USA"}
         result = map_job(raw)
-        self.assertEqual(result["countries_allowed"], ["USA"])
+        self.assertEqual(result["countries_allowed"], ["US"])
 
     def test_empty_location(self):
         raw = {**SAMPLE_RAW, "location": ""}

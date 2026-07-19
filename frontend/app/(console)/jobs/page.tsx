@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 
 type Job = {
   id: string;
@@ -93,8 +93,10 @@ export default function JobsPage() {
   const [lang, setLang] = useState<Lang>('original');
   const [translating, setTranslating] = useState(false);
 
-  // Hydrate lang from localStorage after mount
+  // Hydrate lang from localStorage after mount (SSR renders 'original';
+  // reading localStorage before mount would cause a hydration mismatch)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLang(getInitialLang());
   }, []);
 
@@ -115,9 +117,10 @@ export default function JobsPage() {
           const data: JobsResponse = await res.json();
           setJobs(data.jobs);
           setTotal(data.total);
-          // Auto-select first job if none selected
-          if (data.jobs.length > 0 && !selectedJobId) {
-            setSelectedJobId(data.jobs[0].id);
+          // Auto-select first job if none selected (functional update keeps
+          // selectedJobId out of the deps so refetch isn't tied to selection)
+          if (data.jobs.length > 0) {
+            setSelectedJobId((prev) => prev ?? data.jobs[0].id);
           }
         }
       } catch {
@@ -135,6 +138,7 @@ export default function JobsPage() {
   // Load detail when selection changes
   useEffect(() => {
     if (!selectedJobId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear stale detail on deselect
       setDetail(null);
       return;
     }
