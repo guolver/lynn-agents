@@ -12,6 +12,7 @@ dependencies = [
   "alembic>=1.16,<2",
   "celery[redis]>=5.4,<6",
   "fastapi>=0.115,<1",
+  "langfuse>=3,<4",
   "neo4j>=5.20,<6",
   "openai>=1.30",
   "pgvector>=0.3,<1",

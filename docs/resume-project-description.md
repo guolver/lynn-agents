@@ -320,4 +320,5 @@ Docker 构建在代理网络环境下反复失败：容器内直连 PyPI/镜像�
 | LLM 对话 Agent Loop | `src/agent_hub/agents/global_part_time/chat_service.py`（逐段导读见 `docs/chat-agent-loop-explained.md`） |
 | MCP Server（受控动作对外暴露） | `src/agent_hub/mcp_server.py` + `docs/mcp-server.md` |
 | Agent 工具选择评测 | `scripts/eval_agent_tools.py` + `docs/agent-tool-eval-report.md`（提示词迭代 68.9%→92.2%，可复现） |
+| LLM 可观测性（Langfuse） | `src/agent_hub/observability.py` + `docs/observability.md`（每轮调用/工具/token 用量追踪，no-op 降级） |
 | 系统架构与分层 | 本文档"系统架构"节；组装入口 `src/agent_hub/app.py`（create_app 显式装配）；平台核心 `src/agent_hub/core/`；详细版 `docs/system-architecture.md` |

@@ -95,4 +95,5 @@ POST /platform/v1/agents/{agent_id}/actions/{name} # 调用动作
 - [新增 Agent 指南](docs/adding-agents.md)
 - [兼职 Agent 设计](docs/global-part-time-agent.md)
 - [MCP Server](docs/mcp-server.md)
+- [LLM 可观测性](docs/observability.md)
 - [开发环境搭建](docs/dev-guide.md)

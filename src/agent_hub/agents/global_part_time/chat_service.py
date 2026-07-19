@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Generator
 from typing import Any
 
+from ...observability import get_chat_tracer
 from .chat_tools import TOOL_DEFINITIONS, execute_tool
 from .service import AgentService
 
@@ -57,9 +58,11 @@ MAX_HISTORY_MESSAGES = 40
 class ChatService:
     """Manages chat sessions, persists messages, and streams LLM responses."""
 
-    def __init__(self, *, service: AgentService, repo: Any):
+    def __init__(self, *, service: AgentService, repo: Any, tracer: Any = None):
         self.service = service
         self.repo = repo
+        # 观测旁路：未配置 Langfuse 时为 no-op，见 observability.py
+        self.tracer = tracer if tracer is not None else get_chat_tracer()
 
     def create_session(self, actor: str = "anonymous") -> dict[str, Any]:
         session_id = str(uuid.uuid4())
@@ -372,155 +375,204 @@ class ChatService:
         client = OpenAI(api_key=api_key, base_url=base_url)
         actor = session.get("actor", "chat-user")
 
-        # Allow multiple rounds of tool calling
-        max_rounds = 5
-        for _ in range(max_rounds):
-            try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=llm_messages,
-                    tools=TOOL_DEFINITIONS,
-                    stream=True,
-                    temperature=0.7,
-                    max_tokens=2048,
-                )
-            except Exception as exc:
-                logger.exception("DeepSeek API call failed")
-                yield {"event": "error", "data": {"detail": f"LLM service error: {exc}"}}
-                return
+        # 观测：一次用户消息 = 一条 trace；no-op tracer 时以下埋点零开销。
+        turn = self.tracer.start_turn(
+            session_id=session_id,
+            actor=actor,
+            user_message=user_message,
+            candidate_id=candidate_id,
+        )
+        turn_output: str | None = None
+        turn_error: str | None = None
 
-            # Collect the streamed response
+        try:
+            # Allow multiple rounds of tool calling
+            max_rounds = 5
             collected_content = ""
-            collected_tool_calls: list[dict[str, Any]] = []
-            current_tool_call: dict[str, Any] | None = None
-
-            for chunk in response:
-                delta = chunk.choices[0].delta if chunk.choices else None
-                if delta is None:
-                    continue
-
-                # Content delta
-                if delta.content:
-                    collected_content += delta.content
-                    yield {"event": "delta", "data": {"content": delta.content}}
-
-                # Tool call deltas
-                if delta.tool_calls:
-                    for tc_delta in delta.tool_calls:
-                        if tc_delta.index is not None:
-                            while len(collected_tool_calls) <= tc_delta.index:
-                                collected_tool_calls.append(
-                                    {"id": "", "function": {"name": "", "arguments": ""}}
-                                )
-                            current_tool_call = collected_tool_calls[tc_delta.index]
-                        if tc_delta.id:
-                            current_tool_call["id"] = tc_delta.id
-                        if tc_delta.function:
-                            if tc_delta.function.name:
-                                current_tool_call["function"]["name"] += tc_delta.function.name
-                            if tc_delta.function.arguments:
-                                current_tool_call["function"]["arguments"] += (
-                                    tc_delta.function.arguments
-                                )
-
-                # finish_reason is checked implicitly when stream ends
-
-            if collected_tool_calls:
-                # Save assistant message with tool calls
-                serializable_calls = [
-                    {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"],
-                        },
-                    }
-                    for tc in collected_tool_calls
-                ]
-                self.add_message(
-                    session_id,
-                    "assistant",
-                    collected_content,
-                    tool_calls=serializable_calls,
+            for round_index in range(max_rounds):
+                generation = turn.generation(
+                    name=f"llm-round-{round_index + 1}",
+                    model=model,
+                    input_messages=list(llm_messages),
+                    parameters={"temperature": 0.7, "max_tokens": 2048},
                 )
-
-                # Add assistant message to LLM context
-                llm_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": collected_content or None,
-                        "tool_calls": serializable_calls,
-                    }
-                )
-
-                # Execute each tool call
-                for tc in collected_tool_calls:
-                    tool_name = tc["function"]["name"]
-                    try:
-                        tool_args = json.loads(tc["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        tool_args = {}
-
-                    yield {
-                        "event": "tool_call",
-                        "data": {"name": tool_name, "arguments": tool_args},
-                    }
-
-                    # 会话内轮换：已推荐过的岗位排后，保证再次推荐有差异性。
-                    if tool_name == "run_matches":
-                        shown = self.shown_job_ids(session_id)
-                        if shown:
-                            tool_args = {**tool_args, "exclude_job_ids": sorted(shown)}
-
-                    result = execute_tool(
-                        tool_name,
-                        tool_args,
-                        service=self.service,
-                        actor=actor,
+                try:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=llm_messages,
+                        tools=TOOL_DEFINITIONS,
+                        stream=True,
+                        stream_options={"include_usage": True},
+                        temperature=0.7,
+                        max_tokens=2048,
                     )
+                except Exception as exc:
+                    logger.exception("DeepSeek API call failed")
+                    generation.end(error=str(exc))
+                    turn_error = f"LLM service error: {exc}"
+                    yield {"event": "error", "data": {"detail": turn_error}}
+                    return
 
-                    # If parse_resume created a candidate, bind to session
-                    if tool_name == "parse_resume" and "candidate" in result:
-                        new_candidate_id = result["candidate"]["id"]
-                        self.bind_candidate(session_id, new_candidate_id)
-                        candidate_id = new_candidate_id
+                # Collect the streamed response
+                collected_content = ""
+                collected_tool_calls: list[dict[str, Any]] = []
+                current_tool_call: dict[str, Any] | None = None
+                usage: dict[str, int] | None = None
 
-                    yield {
-                        "event": "tool_result",
-                        "data": {"name": tool_name, "result": result},
-                    }
+                for chunk in response:
+                    # include_usage 的最后一个 chunk 携带 token 用量且 choices 为空
+                    if getattr(chunk, "usage", None):
+                        usage = {
+                            "input": chunk.usage.prompt_tokens,
+                            "output": chunk.usage.completion_tokens,
+                            "total": chunk.usage.total_tokens,
+                        }
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta is None:
+                        continue
 
-                    # Save tool result message
-                    result_content = json.dumps(result, ensure_ascii=False, default=str)
-                    # Truncate very large results
-                    if len(result_content) > 8000:
-                        result_content = result_content[:8000] + "...(truncated)"
+                    # Content delta
+                    if delta.content:
+                        collected_content += delta.content
+                        yield {"event": "delta", "data": {"content": delta.content}}
+
+                    # Tool call deltas
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            if tc_delta.index is not None:
+                                while len(collected_tool_calls) <= tc_delta.index:
+                                    collected_tool_calls.append(
+                                        {"id": "", "function": {"name": "", "arguments": ""}}
+                                    )
+                                current_tool_call = collected_tool_calls[tc_delta.index]
+                            if tc_delta.id:
+                                current_tool_call["id"] = tc_delta.id
+                            if tc_delta.function:
+                                if tc_delta.function.name:
+                                    current_tool_call["function"]["name"] += tc_delta.function.name
+                                if tc_delta.function.arguments:
+                                    current_tool_call["function"]["arguments"] += (
+                                        tc_delta.function.arguments
+                                    )
+
+                    # finish_reason is checked implicitly when stream ends
+
+                generation.end(
+                    output={
+                        "content": collected_content,
+                        "tool_calls": [tc["function"]["name"] for tc in collected_tool_calls],
+                    },
+                    usage=usage,
+                )
+
+                if collected_tool_calls:
+                    # Save assistant message with tool calls
+                    serializable_calls = [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["function"]["name"],
+                                "arguments": tc["function"]["arguments"],
+                            },
+                        }
+                        for tc in collected_tool_calls
+                    ]
                     self.add_message(
                         session_id,
-                        "tool",
-                        result_content,
-                        tool_call_id=tc["id"],
+                        "assistant",
+                        collected_content,
+                        tool_calls=serializable_calls,
                     )
 
-                    # Add to LLM context
+                    # Add assistant message to LLM context
                     llm_messages.append(
                         {
-                            "role": "tool",
-                            "content": result_content,
-                            "tool_call_id": tc["id"],
+                            "role": "assistant",
+                            "content": collected_content or None,
+                            "tool_calls": serializable_calls,
                         }
                     )
 
-                # Continue the loop to let LLM generate a response based on tool results
-                continue
+                    # Execute each tool call
+                    for tc in collected_tool_calls:
+                        tool_name = tc["function"]["name"]
+                        try:
+                            tool_args = json.loads(tc["function"]["arguments"])
+                        except json.JSONDecodeError:
+                            tool_args = {}
 
-            else:
-                # No tool calls — final text response
-                msg = self.add_message(session_id, "assistant", collected_content)
-                yield {"event": "done", "data": {"message_id": msg["id"]}}
-                return
+                        yield {
+                            "event": "tool_call",
+                            "data": {"name": tool_name, "arguments": tool_args},
+                        }
 
-        # If we hit max rounds
-        msg = self.add_message(session_id, "assistant", collected_content)
-        yield {"event": "done", "data": {"message_id": msg["id"]}}
+                        # 会话内轮换：已推荐过的岗位排后，保证再次推荐有差异性。
+                        if tool_name == "run_matches":
+                            shown = self.shown_job_ids(session_id)
+                            if shown:
+                                tool_args = {**tool_args, "exclude_job_ids": sorted(shown)}
+
+                        tool_span = turn.tool(name=tool_name, arguments=tool_args)
+                        result = execute_tool(
+                            tool_name,
+                            tool_args,
+                            service=self.service,
+                            actor=actor,
+                        )
+
+                        # If parse_resume created a candidate, bind to session
+                        if tool_name == "parse_resume" and "candidate" in result:
+                            new_candidate_id = result["candidate"]["id"]
+                            self.bind_candidate(session_id, new_candidate_id)
+                            candidate_id = new_candidate_id
+
+                        yield {
+                            "event": "tool_result",
+                            "data": {"name": tool_name, "result": result},
+                        }
+
+                        # Save tool result message
+                        result_content = json.dumps(result, ensure_ascii=False, default=str)
+                        # Truncate very large results
+                        if len(result_content) > 8000:
+                            result_content = result_content[:8000] + "...(truncated)"
+                        tool_span.end(
+                            output=result_content,
+                            error=result.get("error") if isinstance(result, dict) else None,
+                        )
+                        self.add_message(
+                            session_id,
+                            "tool",
+                            result_content,
+                            tool_call_id=tc["id"],
+                        )
+
+                        # Add to LLM context
+                        llm_messages.append(
+                            {
+                                "role": "tool",
+                                "content": result_content,
+                                "tool_call_id": tc["id"],
+                            }
+                        )
+
+                    # Continue the loop to let LLM generate a response based on tool results
+                    continue
+
+                else:
+                    # No tool calls — final text response
+                    msg = self.add_message(session_id, "assistant", collected_content)
+                    turn_output = collected_content
+                    yield {"event": "done", "data": {"message_id": msg["id"]}}
+                    return
+
+            # If we hit max rounds
+            msg = self.add_message(session_id, "assistant", collected_content)
+            turn_output = collected_content
+            yield {"event": "done", "data": {"message_id": msg["id"]}}
+        finally:
+            # 客户端中途放弃（GeneratorExit）也会走到这里，trace 不会悬空
+            if turn_output is None and turn_error is None:
+                turn_error = "interrupted"
+            turn.end(output=turn_output, error=turn_error)
