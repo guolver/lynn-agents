@@ -192,7 +192,9 @@ def get_chat_tracer() -> NoopTracer | LangfuseTracer:
         client = Langfuse(
             public_key=public_key,
             secret_key=secret_key,
-            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            host=os.getenv("LANGFUSE_HOST")
+            or os.getenv("LANGFUSE_BASE_URL")
+            or "https://cloud.langfuse.com",
         )
         _tracer = LangfuseTracer(client)
         logger.info("langfuse tracing enabled")
