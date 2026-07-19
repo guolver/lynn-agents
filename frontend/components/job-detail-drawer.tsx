@@ -24,7 +24,15 @@ type Job = {
   published_at?: string;
 };
 
-export function JobDetailDrawer({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+export function JobDetailDrawer({
+  jobId,
+  onClose,
+  onGenerateKit,
+}: {
+  jobId: string;
+  onClose: () => void;
+  onGenerateKit?: (title: string) => void;
+}) {
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -141,6 +149,17 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: string; onClose: ()
                     className="job-drawer-desc"
                     dangerouslySetInnerHTML={{ __html: job.description_zh || job.description_original || '' }}
                   />
+                </div>
+              )}
+
+              {onGenerateKit && (
+                <div className="job-drawer-section">
+                  <button
+                    className="match-card-kit-btn"
+                    onClick={() => onGenerateKit(job.title_zh || job.title_original || '')}
+                  >
+                    ✍️ 生成申请材料
+                  </button>
                 </div>
               )}
 
