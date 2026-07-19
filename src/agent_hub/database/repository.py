@@ -16,6 +16,7 @@ from typing import Any, Callable
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from agent_hub.core.contracts import AuthorizationError
 from agent_hub.database.models import (
     Approval,
     AuditLog,
@@ -139,6 +140,18 @@ class PostgresRepository:
         """Check if a model class has a JSONB payload column."""
         return hasattr(model_cls, "payload")
 
+    def _chat_session_belongs_to_tenant(
+        self, session: Session, session_id: str | None, tenant_id: str
+    ) -> bool:
+        """``ChatMessage`` has no ``tenant_id`` column of its own — every
+        tenant-scoped chat_message operation must instead verify ownership of
+        the *session_id* it references against the owning ``ChatSession``.
+        """
+        if not session_id:
+            return False
+        owning = session.get(ChatSession, session_id)
+        return owning is not None and owning.tenant_id == tenant_id
+
     def _row_to_dict(self, row: Any, kind: str) -> dict[str, Any]:
         """Convert a model row to a dict, handling both payload and non-payload models."""
         if hasattr(row, "payload"):
@@ -185,6 +198,19 @@ class PostgresRepository:
         owns_session = not self._is_context_session()
 
         try:
+            if kind == "chat_message" and tenant_id is not None:
+                # ChatMessage has no tenant_id column: verify the referenced
+                # session belongs to this tenant before allowing the write,
+                # so a scoped repo can never insert into another tenant's
+                # session undetected.
+                if not self._chat_session_belongs_to_tenant(
+                    session, item.get("session_id"), tenant_id
+                ):
+                    raise AuthorizationError(
+                        f"chat_session {item.get('session_id')!r} does not belong to tenant "
+                        f"{tenant_id!r}"
+                    )
+
             if natural:
                 # Use savepoint for natural-key conflict resolution.
                 nk_values = {col: typed[col] for col in natural}
@@ -198,18 +224,6 @@ class PostgresRepository:
                         return self._row_to_dict(existing, kind)
 
             row = session.get(model_cls, item["id"])
-            if (
-                row is not None
-                and tenant_id is not None
-                and has_tenant_column
-                and row.tenant_id != tenant_id
-            ):
-                # The id belongs to another tenant's row — refuse to overwrite it
-                # instead of silently upserting across the tenant boundary.
-                raise PermissionError(
-                    f"entity {item['id']!r} of kind {kind!r} does not belong to tenant "
-                    f"{tenant_id!r}"
-                )
             if row is not None:
                 if has_payload:
                     row.payload = item
@@ -253,10 +267,12 @@ class PostgresRepository:
         try:
             if kind == "chat_message":
                 row = session.get(ChatMessage, entity_id)
-                if row is not None and tenant_id is not None:
-                    owning = session.get(ChatSession, row.session_id)
-                    if owning is None or owning.tenant_id != tenant_id:
-                        return None
+                if (
+                    row is not None
+                    and tenant_id is not None
+                    and not self._chat_session_belongs_to_tenant(session, row.session_id, tenant_id)
+                ):
+                    return None
                 return self._row_to_dict(row, kind) if row else None
             row = session.get(model_cls, entity_id)
             if (
@@ -309,10 +325,10 @@ class PostgresRepository:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
-            if tenant_id is not None:
-                owning = session.get(ChatSession, session_id)
-                if owning is None or owning.tenant_id != tenant_id:
-                    return []
+            if tenant_id is not None and not self._chat_session_belongs_to_tenant(
+                session, session_id, tenant_id
+            ):
+                return []
 
             rows = (
                 session.execute(
@@ -353,10 +369,12 @@ class PostgresRepository:
         try:
             if kind == "chat_message":
                 row = session.get(ChatMessage, entity_id)
-                if row is not None and tenant_id is not None:
-                    owning = session.get(ChatSession, row.session_id)
-                    if owning is None or owning.tenant_id != tenant_id:
-                        row = None
+                if (
+                    row is not None
+                    and tenant_id is not None
+                    and not self._chat_session_belongs_to_tenant(session, row.session_id, tenant_id)
+                ):
+                    row = None
             else:
                 row = session.get(model_cls, entity_id)
                 if (
@@ -388,10 +406,10 @@ class PostgresRepository:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
-            if tenant_id is not None:
-                owning = session.get(ChatSession, session_id)
-                if owning is None or owning.tenant_id != tenant_id:
-                    return  # not this tenant's session: no-op
+            if tenant_id is not None and not self._chat_session_belongs_to_tenant(
+                session, session_id, tenant_id
+            ):
+                return  # not this tenant's session: no-op
 
             # Delete messages first
             session.execute(
@@ -543,14 +561,10 @@ class PostgresRepository:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
-            stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(capped)
+            stmt = select(AuditLog)
             if tenant_id is not None:
-                stmt = (
-                    select(AuditLog)
-                    .where(AuditLog.tenant_id == tenant_id)
-                    .order_by(AuditLog.created_at.desc())
-                    .limit(capped)
-                )
+                stmt = stmt.where(AuditLog.tenant_id == tenant_id)
+            stmt = stmt.order_by(AuditLog.created_at.desc()).limit(capped)
             rows = session.execute(stmt).scalars().all()
             return [
                 {
@@ -679,8 +693,14 @@ class PostgresRepository:
         """Return a lightweight view of this repository scoped to *tenant_id*.
 
         Reuses this repository's engine/session factory — no new engine is
-        created per tenant scope.
+        created per tenant scope. ``tenant_id`` must be a non-empty string:
+        internally, ``None`` means "unscoped" to the private ``_method(...,
+        tenant_id=None)`` twins, so silently accepting ``None``/``""`` here
+        would produce an object that looks tenant-scoped but actually reads
+        and writes across every tenant — a fail-open security bug.
         """
+        if not tenant_id:
+            raise ValueError("tenant_id must be a non-empty string")
         return _TenantPostgresRepository(self, tenant_id)
 
     def update_job_embeddings(self, embeddings: dict[str, list[float]]) -> int:

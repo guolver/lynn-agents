@@ -171,6 +171,53 @@ def test_chat_message_delete_by_session_is_scoped_to_owning_tenant(root_repo):
     assert acme.list_by_session("s1") == []
 
 
+def test_chat_message_put_is_rejected_for_a_session_owned_by_another_tenant(root_repo):
+    """The write-side counterpart of the read/delete scoping above: a tenant
+    must not be able to insert a chat_message into a session it does not own.
+    """
+    from agent_hub.core.contracts import AuthorizationError
+
+    acme = root_repo.for_tenant("acme")
+    beta = root_repo.for_tenant("beta")
+    acme.put("chat_session", {"id": "s1", "actor": "u1", "status": "active"})
+
+    with pytest.raises(AuthorizationError):
+        beta.put("chat_message", {"id": "m1", "session_id": "s1", "role": "user", "content": "hi"})
+
+    # The rejected write must not have leaked into either tenant's data.
+    assert acme.list_by_session("s1") == []
+    assert beta.get("chat_message", "m1") is None
+
+
+def test_chat_message_put_is_rejected_for_a_nonexistent_session(root_repo):
+    beta = root_repo.for_tenant("beta")
+
+    from agent_hub.core.contracts import AuthorizationError
+
+    with pytest.raises(AuthorizationError):
+        beta.put(
+            "chat_message",
+            {"id": "m1", "session_id": "does-not-exist", "role": "user", "content": "hi"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# for_tenant() must never silently degrade to an unscoped repository.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_tenant_id", [None, ""])
+def test_for_tenant_rejects_none_or_empty_tenant_id(root_repo, bad_tenant_id):
+    """A previous bug: `for_tenant(None)` meant "unscoped" to the internal
+    `_method(..., tenant_id=None)` convention on PostgresRepository, so it
+    silently returned an object that read/wrote across every tenant instead
+    of failing. InMemoryRepository diverged the other way (fails closed).
+    Both backends must now reject invalid input the same way.
+    """
+    with pytest.raises(ValueError):
+        root_repo.for_tenant(bad_tenant_id)
+
+
 # ---------------------------------------------------------------------------
 # PostgreSQL-only: vector search and category aggregation, which InMemory does
 # not implement, but which the concrete Postgres wrapper must scope per the spec.

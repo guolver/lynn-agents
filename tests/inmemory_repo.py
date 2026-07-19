@@ -17,6 +17,7 @@ import json
 from typing import Any, Callable
 
 from agent_hub.agents.global_part_time.domain import utcnow
+from agent_hub.core.contracts import AuthorizationError
 
 _DEFAULT_TENANT = "default"
 
@@ -38,6 +39,14 @@ class InMemoryRepository:
         self._default = self.for_tenant(_DEFAULT_TENANT)
 
     def for_tenant(self, tenant_id: str) -> "_TenantInMemoryRepository":
+        """Return a view scoped to *tenant_id*.
+
+        ``tenant_id`` must be a non-empty string. Mirrors the same guard on
+        ``PostgresRepository.for_tenant`` so both backends fail the same way
+        (raise) instead of one failing open and the other failing closed.
+        """
+        if not tenant_id:
+            raise ValueError("tenant_id must be a non-empty string")
         return _TenantInMemoryRepository(self, tenant_id)
 
     # ------------------------------------------------------------------
@@ -105,7 +114,24 @@ class _TenantInMemoryRepository:
         self._root = root
         self.tenant_id = tenant_id
 
+    def _chat_session_belongs_to_tenant(self, session_id: str | None) -> bool:
+        """Mirrors ``PostgresRepository._chat_session_belongs_to_tenant``: chat
+        messages carry no tenant of their own, so ownership is checked via the
+        session they reference.
+        """
+        if not session_id:
+            return False
+        session = self._root._entities.get(self.tenant_id, {}).get("chat_session", {})
+        return session_id in session
+
     def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]:
+        if kind == "chat_message" and not self._chat_session_belongs_to_tenant(
+            item.get("session_id")
+        ):
+            raise AuthorizationError(
+                f"chat_session {item.get('session_id')!r} does not belong to tenant "
+                f"{self.tenant_id!r}"
+            )
         now = utcnow()
         item.setdefault("created_at", now)
         item["updated_at"] = now
