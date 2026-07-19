@@ -77,6 +77,33 @@ class DomainRulesTest(unittest.TestCase):
         self.assertEqual(result.level, "high")
         self.assertEqual(result.action, "reject")
 
+    def test_stub_description_requires_review(self):
+        """LinkedIn 转载存根：截断样板文而非真实 JD，应进入人工审核而非直接放行。"""
+        stub = dict(
+            self.job,
+            description_original=(
+                "Posted 1:21:26 PM. Project ManagerLocation: Remote, Canada Empire life is "
+                "looking to hire a Project Manager to join…See this and similar jobs on LinkedIn."
+            ),
+        )
+        result = assess_risk(stub)
+        self.assertTrue(any(s.startswith("stub_description") for s in result.signals))
+        self.assertEqual(result.action, "review")
+
+    def test_tag_stuffing_requires_review(self):
+        """标签堆砌（几十个不相关 tag 当 skills）会污染技能匹配，应进入人工审核。"""
+        stuffed = dict(
+            self.job,
+            skills=[f"tag{i}" for i in range(30)],
+        )
+        result = assess_risk(stuffed)
+        self.assertIn("tag_stuffing", result.signals)
+        self.assertEqual(result.action, "review")
+
+    def test_normal_job_with_reasonable_skills_still_accepted(self):
+        result = assess_risk(self.job)
+        self.assertEqual(result.action, "accept")
+
     def test_dedup_ignores_source_and_tracking_url(self):
         other = dict(self.job, source_id="other", canonical_url="https://mirror.test/x")
         self.assertEqual(dedup_key(self.job), dedup_key(other))

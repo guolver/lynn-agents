@@ -55,6 +55,13 @@ MEDIUM_RISK_TERMS = {
     "easy money",
     "unlimited earnings",
 }
+# 内容质量信号：描述是聚合站转载存根（截断样板文），不是真实 JD。
+STUB_DESCRIPTION_MARKERS = {
+    "see this and similar jobs on linkedin",
+    "upgrade to premium to see salary",
+}
+# skills 超过该数量视为标签堆砌（正常职位 3~10 个），会污染技能匹配。
+MAX_SKILLS_BEFORE_STUFFING = 12
 
 
 def utcnow() -> str:
@@ -138,6 +145,15 @@ def assess_risk(job: dict[str, Any]) -> RiskResult:
     if job.get("compensation_max") is None:
         signals.append("missing:compensation")
         score += 0.08
+    description = str(job.get("description_original", "")).casefold()
+    for marker in sorted(STUB_DESCRIPTION_MARKERS):
+        if marker in description:
+            signals.append(f"stub_description:{marker[:30]}")
+            score += 0.25
+            break
+    if len(job.get("skills") or []) > MAX_SKILLS_BEFORE_STUFFING:
+        signals.append("tag_stuffing")
+        score += 0.25
     score = min(round(score, 4), 1.0)
     if score >= 0.60:
         return RiskResult(score, "high", signals, "reject")

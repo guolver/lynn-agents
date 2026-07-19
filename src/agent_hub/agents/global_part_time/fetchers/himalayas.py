@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from http.client import HTTPException
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -123,7 +124,7 @@ def fetch(*, limit: int = 200, start_offset: int = 0) -> list[dict]:
         try:
             with urlopen(request, context=_SSL_CONTEXT, timeout=60) as response:
                 data = json.loads(response.read())
-        except (TimeoutError, OSError):
+        except (TimeoutError, OSError, HTTPException, json.JSONDecodeError):
             retries += 1
             if retries > max_retries:
                 break  # return what we have
