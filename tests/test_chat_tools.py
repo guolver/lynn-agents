@@ -57,3 +57,30 @@ def test_execute_unknown_tool():
     service = MagicMock()
     result = execute_tool("nonexistent", {}, service=service, actor="test")
     assert "error" in result
+
+
+def test_execute_parse_resume_persists_resume_text(monkeypatch):
+    import agent_hub.agents.global_part_time.resume_parser as rp
+
+    monkeypatch.setattr(rp, "parse_resume", lambda text: {"country": "CN", "skills": []})
+    service = MagicMock()
+    service.create_candidate.return_value = {"id": "c1", "resume_text": "张三的简历原文"}
+    result = execute_tool(
+        "parse_resume", {"pdf_text": "张三的简历原文"}, service=service, actor="t"
+    )
+    # 建档 payload 里带原文
+    created_payload = service.create_candidate.call_args[0][0]
+    assert created_payload["resume_text"] == "张三的简历原文"
+    # 工具返回值不回显原文（避免撑爆 LLM 上下文与 tool 消息）
+    assert "resume_text" not in result["candidate"]
+
+
+def test_execute_parse_resume_caps_resume_text_at_20000(monkeypatch):
+    import agent_hub.agents.global_part_time.resume_parser as rp
+
+    monkeypatch.setattr(rp, "parse_resume", lambda text: {"country": "CN", "skills": []})
+    service = MagicMock()
+    service.create_candidate.return_value = {"id": "c1"}
+    execute_tool("parse_resume", {"pdf_text": "x" * 25000}, service=service, actor="t")
+    created_payload = service.create_candidate.call_args[0][0]
+    assert len(created_payload["resume_text"]) == 20000

@@ -14,6 +14,9 @@ from .service import AgentService
 
 logger = logging.getLogger(__name__)
 
+# 简历原文入库上限：防止超大 PDF 撑爆 candidate payload（会随多个接口返回）。
+RESUME_TEXT_STORE_LIMIT = 20000
+
 TOOL_DEFINITIONS = [
     {
         "type": "function",
@@ -154,9 +157,14 @@ def execute_tool(
             from .resume_parser import parse_resume
 
             parsed = parse_resume(arguments["pdf_text"])
-            candidate = service.create_candidate(parsed, actor)
+            candidate = service.create_candidate(
+                {**parsed, "resume_text": arguments["pdf_text"][:RESUME_TEXT_STORE_LIMIT]},
+                actor,
+            )
             service.set_consent(candidate["id"], True, actor, "chat_upload")
-            return {"candidate": candidate, "parsed_fields": parsed}
+            # 原文已入库，工具返回值剔除它：避免整份简历进入 LLM 上下文和 tool 消息。
+            candidate_public = {k: v for k, v in candidate.items() if k != "resume_text"}
+            return {"candidate": candidate_public, "parsed_fields": parsed}
 
         if name == "run_matches":
             candidate_id = arguments["candidate_id"]
