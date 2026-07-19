@@ -84,3 +84,18 @@ def test_execute_parse_resume_caps_resume_text_at_20000(monkeypatch):
     execute_tool("parse_resume", {"pdf_text": "x" * 25000}, service=service, actor="t")
     created_payload = service.create_candidate.call_args[0][0]
     assert len(created_payload["resume_text"]) == 20000
+
+
+def test_get_my_profile_truncates_long_resume_text():
+    service = MagicMock()
+    service.get_candidate.return_value = {"id": "c1", "resume_text": "y" * 7000}
+    result = execute_tool("get_my_profile", {"candidate_id": "c1"}, service=service, actor="t")
+    assert result["resume_text"].endswith("...(truncated)")
+    assert len(result["resume_text"]) == 6000 + len("...(truncated)")
+
+
+def test_get_my_profile_without_resume_text_unchanged():
+    service = MagicMock()
+    service.get_candidate.return_value = {"id": "c1", "country": "CN"}
+    result = execute_tool("get_my_profile", {"candidate_id": "c1"}, service=service, actor="t")
+    assert "resume_text" not in result

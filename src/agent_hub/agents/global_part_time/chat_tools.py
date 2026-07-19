@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 # 简历原文入库上限：防止超大 PDF 撑爆 candidate payload（会随多个接口返回）。
 RESUME_TEXT_STORE_LIMIT = 20000
 
+# get_my_profile 返回给 LLM 的原文截断长度。
+RESUME_TEXT_PROFILE_LIMIT = 6000
+
 TOOL_DEFINITIONS = [
     {
         "type": "function",
@@ -239,6 +242,12 @@ def execute_tool(
 
         if name == "get_my_profile":
             candidate = service.get_candidate(arguments["candidate_id"])
+            resume_text = candidate.get("resume_text")
+            if resume_text and len(resume_text) > RESUME_TEXT_PROFILE_LIMIT:
+                candidate = {
+                    **candidate,
+                    "resume_text": resume_text[:RESUME_TEXT_PROFILE_LIMIT] + "...(truncated)",
+                }
             return candidate
 
         return {"error": f"Unknown tool: {name}"}
