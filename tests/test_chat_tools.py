@@ -50,7 +50,7 @@ def test_execute_run_matches():
         actor="test",
     )
     assert len(result["matches"]) == 1
-    service.run_matches.assert_called_once_with("c1", "test", 10)
+    service.run_matches.assert_called_once_with("c1", "test", 10, exclude_job_ids=None)
 
 
 def test_execute_unknown_tool():

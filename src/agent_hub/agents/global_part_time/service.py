@@ -220,8 +220,19 @@ class AgentService:
         )
         return {"deleted": True, "candidate_id": candidate_id}
 
-    def run_matches(self, candidate_id: str, actor: str, limit: int = 50) -> dict[str, Any]:
-        """先运行硬过滤，再为剩余职位生成版本化、可解释的匹配结果。"""
+    def run_matches(
+        self,
+        candidate_id: str,
+        actor: str,
+        limit: int = 50,
+        exclude_job_ids: list[str] | set[str] | None = None,
+    ) -> dict[str, Any]:
+        """先运行硬过滤，再为剩余职位生成版本化、可解释的匹配结果。
+
+        exclude_job_ids（如会话内已推荐过的岗位）不会被剔除，而是排到未展示
+        岗位之后：优先出新岗位，新岗位不足 limit 时按分数回填，保证"换一批"
+        既有差异性又不返回空列表。
+        """
         candidate = self._required("candidate", candidate_id)
         expansion_failed = False
 
@@ -351,7 +362,8 @@ class AgentService:
             }
             self.repo.put("match", match)
             results.append(match)
-        results.sort(key=lambda x: x["score"], reverse=True)
+        exclude = set(exclude_job_ids or ())
+        results.sort(key=lambda x: (x["job_id"] in exclude, -x["score"]))
         results = results[:limit]
         self.repo.audit(
             "matches.run",
@@ -361,6 +373,7 @@ class AgentService:
             {
                 "matched": len(results),
                 "filtered": len(filtered),
+                "excluded_rotated": len(exclude),
                 "rule_version": RULE_VERSION,
                 "retrieval_method": retrieval_method,
             },

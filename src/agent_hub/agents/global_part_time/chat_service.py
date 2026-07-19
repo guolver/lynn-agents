@@ -32,6 +32,8 @@ SYSTEM_PROMPT = """\
 - 用中文回复，除非用户用其他语言
 - 回复简洁，避免冗长列表，突出重点
 - 推荐岗位时使用 run_matches 工具，不要编造职位信息
+- 用户再次要求推荐时，系统会自动优先展示之前没推荐过的岗位；\
+如果新岗位不多，如实说明并建议用户调整偏好或稍后再试
 """
 
 MAX_HISTORY_MESSAGES = 40
@@ -114,6 +116,25 @@ class ChatService:
         self.repo.put("chat_message", msg)
         return msg
 
+    def shown_job_ids(self, session_id: str) -> set[str]:
+        """收集本会话已推荐过的岗位 ID，用于再次推荐时轮换出新岗位。"""
+        shown: set[str] = set()
+        for msg in self.repo.list_by_session(session_id):
+            if msg.get("role") != "tool":
+                continue
+            try:
+                payload = json.loads(msg.get("content") or "")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(payload, dict) or payload.get("name") != "run_matches":
+                continue
+            result = payload.get("result") or {}
+            for match in result.get("matches") or []:
+                job_id = match.get("job_id") if isinstance(match, dict) else None
+                if job_id:
+                    shown.add(job_id)
+        return shown
+
     def run_analysis(
         self,
         session_id: str,
@@ -140,9 +161,13 @@ class ChatService:
         candidate_id = candidate["id"]
         self.bind_candidate(session_id, candidate_id)
 
+        match_args: dict[str, Any] = {"candidate_id": candidate_id, "limit": limit}
+        shown = self.shown_job_ids(session_id)
+        if shown:
+            match_args["exclude_job_ids"] = sorted(shown)
         match_result = execute_tool(
             "run_matches",
-            {"candidate_id": candidate_id, "limit": limit},
+            match_args,
             service=self.service,
             actor=actor,
         )
@@ -426,6 +451,12 @@ class ChatService:
                         "event": "tool_call",
                         "data": {"name": tool_name, "arguments": tool_args},
                     }
+
+                    # 会话内轮换：已推荐过的岗位排后，保证再次推荐有差异性。
+                    if tool_name == "run_matches":
+                        shown = self.shown_job_ids(session_id)
+                        if shown:
+                            tool_args = {**tool_args, "exclude_job_ids": sorted(shown)}
 
                     result = execute_tool(
                         tool_name,

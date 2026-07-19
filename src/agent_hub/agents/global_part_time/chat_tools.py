@@ -161,7 +161,9 @@ def execute_tool(
         if name == "run_matches":
             candidate_id = arguments["candidate_id"]
             limit = arguments.get("limit", 10)
-            result = service.run_matches(candidate_id, actor, limit)
+            result = service.run_matches(
+                candidate_id, actor, limit, exclude_job_ids=arguments.get("exclude_job_ids")
+            )
             # Enrich matches with job details
             jobs_by_id = {j["id"]: j for j in service.repo.list("job")}
             for match in result.get("matches", []):

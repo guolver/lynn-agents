@@ -144,6 +144,30 @@ class TestStartStreaming:
             hub.cleanup(stream_id)
 
 
+class TestShownJobIds:
+    def test_collects_job_ids_from_run_matches_tool_history(self, chat_service):
+        session = chat_service.create_session(actor="t")
+        chat_service.add_message(
+            session["id"],
+            "tool",
+            json.dumps(
+                {"name": "run_matches", "result": {"matches": [{"job_id": "j1"}, {"job_id": "j2"}]}}
+            ),
+            tool_call_id="c1",
+        )
+        chat_service.add_message(
+            session["id"],
+            "tool",
+            json.dumps({"name": "get_job_detail", "result": {"job": {"id": "j9"}}}),
+            tool_call_id="c2",
+        )
+        assert chat_service.shown_job_ids(session["id"]) == {"j1", "j2"}
+
+    def test_empty_session_has_no_shown_jobs(self, chat_service):
+        session = chat_service.create_session(actor="t")
+        assert chat_service.shown_job_ids(session["id"]) == set()
+
+
 class TestMessageHistory:
     def test_attachment_metadata_roundtrip(self, chat_service):
         """上传简历的消息应携带附件元数据，历史回放据此重建附件卡片。"""

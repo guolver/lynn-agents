@@ -44,6 +44,33 @@ class ServiceWorkflowTest(unittest.TestCase):
         self.assertEqual(after_send["matches"], [])
         self.assertIn("already_sent", after_send["filtered"][0]["reasons"])
 
+    def test_run_matches_excluded_jobs_rotate_to_back(self):
+        """已展示过的岗位在再次推荐时应排到未展示岗位之后（换一批语义）。"""
+        self.service.review_source(self.source["id"], True, "operator")
+        jobs = []
+        for i in range(3):
+            j = job_payload()
+            j["source_job_id"] = f"job-{i}"
+            j["canonical_url"] = f"https://feed.example.com/jobs/{i}"
+            j["title_original"] = f"Python Data Evaluation {i}"
+            jobs.append(j)
+        result = self.service.sync_source(self.source["id"], jobs, "worker")
+        self.assertEqual(result["imported"], 3)
+        candidate = self.candidate()
+
+        first = self.service.run_matches(candidate["id"], "chat", limit=2)
+        first_ids = [m["job_id"] for m in first["matches"]]
+        self.assertEqual(len(first_ids), 2)
+
+        second = self.service.run_matches(
+            candidate["id"], "chat", limit=2, exclude_job_ids=first_ids
+        )
+        second_ids = [m["job_id"] for m in second["matches"]]
+        # 未展示过的岗位排最前
+        self.assertNotIn(second_ids[0], first_ids)
+        # 未展示岗位不足 limit 时用已展示的按分回填，保证数量
+        self.assertEqual(len(second_ids), 2)
+
     def test_cross_source_duplicate_merges_provenance(self):
         self.service.review_source(self.source["id"], True, "operator")
         first = self.service.sync_source(self.source["id"], [self.job], "worker")
