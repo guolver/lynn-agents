@@ -185,6 +185,66 @@ def test_auth_endpoints_are_bypassed_by_identity_middleware():
     assert response.status_code == 404
 
 
+def test_bearer_token_with_null_roles_claim_returns_401_not_500():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": None},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_bearer_token_with_non_list_roles_claim_returns_401_not_500():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": 123},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_bearer_token_with_dict_roles_claim_returns_401_not_500():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": {"operator": None}},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_bearer_token_with_non_string_role_in_list_returns_401_not_500():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": [123]},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
 def test_security_settings_rejects_short_auth_jwt_secret(monkeypatch):
     monkeypatch.setenv("SECURITY_MODE", "development")
     monkeypatch.setenv("AUTH_JWT_SECRET", "too-short")

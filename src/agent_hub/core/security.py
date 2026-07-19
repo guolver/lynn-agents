@@ -147,7 +147,10 @@ class IdentityMiddleware(BaseHTTPMiddleware):
 
         try:
             claims = pyjwt.decode(token, self.auth_jwt_secret, algorithms=["HS256"])
-            roles = frozenset(Role(value) for value in claims["roles"])
+            raw_roles = claims["roles"]
+            if not isinstance(raw_roles, list):
+                return None
+            roles = frozenset(Role(value) for value in raw_roles)
             if not roles:
                 return None
             return Principal(
