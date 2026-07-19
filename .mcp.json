@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agent-hub": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "agent_hub.mcp_server"],
+      "env": {
+        "AGENT_HUB_API_URL": "http://localhost:8000",
+        "MCP_ACTOR": "mcp:claude-code"
+      }
+    }
+  }
+}

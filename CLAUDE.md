@@ -94,4 +94,5 @@ POST /platform/v1/agents/{agent_id}/actions/{name} # 调用动作
 - [系统架构](docs/system-architecture.md)
 - [新增 Agent 指南](docs/adding-agents.md)
 - [兼职 Agent 设计](docs/global-part-time-agent.md)
+- [MCP Server](docs/mcp-server.md)
 - [开发环境搭建](docs/dev-guide.md)
