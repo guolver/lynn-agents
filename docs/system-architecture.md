@@ -1,7 +1,7 @@
 # Agent Hub 系统架构
 
 > 文档状态：当前实现 + 演进设计  
-> 更新日期：2026-07-15  
+> 更新日期：2026-07-19  
 > 目标读者：平台研发、Agent 开发者、架构师、运维与安全人员
 
 ## 1. 架构目标
@@ -37,7 +37,7 @@ Agent Hub 的目标是让多个业务 Agent 通过统一方式被发现、治理
              │ 其他业务 Agent │  │ 全球兼职匹配 Agent │
              └───────┬────────┘  └────────┬──────────┘
                      │                    │
-             自有服务/数据源       SQLite / 未来 PostgreSQL
+             自有服务/数据源       PostgreSQL + pgvector / Neo4j / Redis+Celery
 ```
 
 外部调用者有两个入口：
@@ -63,8 +63,9 @@ Agent Hub 的目标是让多个业务 Agent 通过统一方式被发现、治理
 │                                                                  │         │
 └──────────────────────────────────────────────────────────────────┼─────────┘
                                                                    ▼
-                                                        SQLite（当前）
-                                                        PostgreSQL（目标）
+                                                     PostgreSQL + pgvector
+                                              （另有 Neo4j 技能图谱、Redis/Celery
+                                                异步流水线，见部署架构一节）
 ```
 
 统一平台入口先经过注册表和 Agent 适配器；兼容 REST API 直接调用同一个 Application Service。两条路径最终共享领域规则和仓储，因此业务结果一致，但平台级动作发现只适用于 `/platform/v1`。
@@ -83,6 +84,10 @@ Agent Hub 的目标是让多个业务 Agent 通过统一方式被发现、治理
 | 领域规则 | `agents/*/domain.py` | 纯确定性校验、过滤、评分 | 数据库、网络和模型调用 |
 | 仓储 | `agents/*/repository.py` | 持久化、审计和幂等边界 | 业务决策 |
 | 兼容 API | `agents/*/http_api.py` | 保留 Agent 专属 REST 接口 | 平台注册与插件发现 |
+| 数据访问 | `agent_hub/database/` | SQLAlchemy 模型、PostgreSQL 仓储实现、pgvector 检索 | 业务规则 |
+| 技能图谱 | `agent_hub/skill_graph/` | Neo4j 别名归一与类别扩展，失败熔断降级 | 阻塞主流程 |
+| 后台流水线 | `agent_hub/worker/` | Celery 任务（采集/向量化/匹配/通知）、错误分类与指数退避、workflow 落库追踪 | 绕过 service 直接写业务表 |
+| 对话编排 | `agents/*/chat_service.py` + `chat_tools.py` | 会话持久化、LLM function calling 多轮工具调用、SSE 流式（Redis StreamHub 解耦生成与连接） | 让 LLM 绕过工具白名单触达业务能力 |
 
 ## 5. Agent 契约
 
@@ -190,11 +195,15 @@ URL 规范化 + 风险规则
   ▼
 跨来源去重
   ▼
+异步批量向量化（Celery，批 64）
+  ▼
 候选人授权检查
+  ▼
+pgvector 余弦召回 top-200（向量层不可用时降级全量扫描）
   ▼
 地区/时区/语言/薪资/工时硬过滤
   ▼
-确定性加权评分 + 推荐理由
+确定性加权评分 + 推荐理由（含检索证据落库）
   ▼
 通知草稿
   ▼
@@ -207,13 +216,20 @@ URL 规范化 + 风险规则
 
 ## 7. 数据架构与所有权
 
-当前 SQLite 使用三类存储结构：
+默认数据库为 PostgreSQL（Alembic 管理迁移，API 启动时自动执行），24 张结构化表按职责分组：
 
-| 存储 | 内容 | 说明 |
+| 分组 | 主要表 | 说明 |
 | --- | --- | --- |
-| `entities` | 来源、职位、候选人、匹配、通知、审批、反馈 | MVP 使用 `kind + id + JSON payload` |
-| `audit_logs` | 事件、实体、操作者、时间和最小必要详情 | 与业务实体分开保存 |
-| `idempotency` | 动作、幂等键、首次响应和时间 | 防止普通重试产生重复副作用 |
+| 职位采集 | `job_sources` / `source_sync_runs` / `raw_jobs` / `jobs` / `job_versions` | 来源审批、同步运行、原始与清洗后职位、版本快照 |
+| 候选人 | `candidates` / `candidate_experiences` / `candidate_skills` | 画像、经历、技能 |
+| 技能 | `skills` / `skill_aliases` / `skill_relations` / `job_skills` | PG 侧技能表（图关系镜像在 Neo4j） |
+| 匹配 | `matches` / `match_evidence` / `match_score_items` | 结果、检索证据（召回方式/相似度/排名）、8 维分项得分 |
+| 流水线 | `workflow_runs` / `workflow_steps` | Celery 任务状态、重试次数、错误类别 |
+| 审批与通知 | `approvals` / `notifications` / `feedback` | 人工审批、通知与用户反馈 |
+| 治理 | `audit_logs` / `idempotency_records` | 审计与幂等（`(action, idempotency_key)` 唯一约束 + advisory lock，与业务写同事务提交） |
+| 对话 | `chat_sessions` / `chat_messages` | LLM 会话与消息（含 tool_calls/tool 配对） |
+
+向量存储：`jobs.embedding vector(1024)` + HNSW 余弦索引（pgvector），召回查询可直接携带业务条件过滤。
 
 数据所有权规则：
 
@@ -221,8 +237,6 @@ URL 规范化 + 风险规则
 - 平台目录只保存 Agent 元数据，不应保存完整业务 payload。
 - Agent 之间通过动作返回必要数据，不共享数据库表。
 - 审计日志不记录访问令牌、完整简历或不必要的敏感信息。
-
-SQLite 实现用于本地开发和单进程 MVP。并发生产环境应替换为 PostgreSQL：幂等键需要唯一约束和事务锁，业务实体应拆分为带外键和索引的结构化表。
 
 ## 8. 插件和扩展机制
 
@@ -278,24 +292,27 @@ Python 插件与平台运行在同一进程，拥有同等代码权限，因此�
 
 ## 10. 部署架构演进
 
-### 10.1 当前：单进程 MVP
+### 10.1 当前：Docker Compose 全栈（7 服务）
 
 ```text
-Uvicorn / FastAPI
-├── Platform API
-├── AgentRegistry（内存）
-├── GlobalPartTimeAgent
-└── SQLite
+docker compose up
+├── api        FastAPI（启动自动跑 Alembic 迁移）
+├── frontend   Next.js 管控台
+├── worker     Celery worker（采集/向量化/匹配/通知）
+├── beat       Celery beat（定时调度）
+├── postgres   PostgreSQL + pgvector（业务库+向量+审计+幂等）
+├── redis      Celery broker + 对话流 StreamHub
+└── neo4j      技能知识图谱
 ```
 
-优点是启动简单、调试成本低；限制是无法安全运行不受信任插件，也不适合高并发、多副本和长任务。
+全部服务带 healthcheck 和依赖编排，一条命令起全栈。长任务已经异步化：任务状态、重试与错误类别落 `workflow_runs`/`workflow_steps`，失败可通过 API 重派。限制：API 单副本、注册表在内存中、不受信任插件仍与 API 同进程。
 
-### 10.2 下一阶段：平台服务 + Worker
+### 10.2 下一阶段：多副本与隔离 Worker
 
 ```text
 API Gateway / Identity Provider
               │
-       Agent Hub API Pods
+       Agent Hub API Pods（多副本）
               │
        PostgreSQL + Redis
               │
@@ -307,7 +324,7 @@ API Gateway / Identity Provider
         External APIs / Model Providers
 ```
 
-该阶段应加入异步任务状态、取消、超时、重试、心跳、集中审批和 OpenTelemetry。
+该阶段应加入任务取消、超时、心跳、集中审批和 OpenTelemetry，并把不受信任插件挪到隔离 worker。
 
 ### 10.3 平台化阶段：多租户与远程 Agent
 
@@ -329,29 +346,38 @@ API Gateway / Identity Provider
 | Agent 或动作不存在 | 返回 404 | 保持 |
 | 缺少幂等键或输入无效 | 返回 422 | 保持并增加错误码 |
 | 业务策略冲突 | 返回 409 | 保持 |
-| 外部来源超时 | 由 Agent 处理 | 异步重试、熔断和告警 |
-| Agent 长任务 | 当前同步执行 | 进入任务队列并返回 execution ID |
-| Worker 崩溃 | 当前未隔离 | 心跳检测、重试或进入人工处理 |
+| 外部来源超时 | 错误分类 + 指数退避重试，上限后转 manual_review | 增加熔断和告警 |
+| Agent 长任务 | Celery 异步执行，状态落 workflow_runs，可查询/重派 | 增加取消与超时 |
+| Worker 崩溃 | 独立容器，重启后任务可重试（幂等键保证安全） | 心跳检测与自动接管 |
 
 ## 12. 目录结构
 
 ```text
 src/
 ├── agent_hub/
-│   ├── app.py
+│   ├── app.py                    # composition root
 │   ├── api/
-│   │   └── platform.py
+│   │   ├── platform.py           # 统一 Agent 发现与调用
+│   │   └── skill_graph.py
 │   ├── core/
 │   │   ├── contracts.py
 │   │   ├── discovery.py
 │   │   └── registry.py
+│   ├── database/                 # SQLAlchemy 模型 + PG 仓储 + pgvector 检索
+│   ├── skill_graph/              # Neo4j 技能图谱（seed/expand/降级）
+│   ├── worker/                   # Celery 任务、错误分类、workflow 追踪
 │   └── agents/
 │       └── global_part_time/
 │           ├── agent.py
 │           ├── domain.py
-│           ├── http_api.py
+│           ├── service.py
 │           ├── repository.py
-│           └── service.py
+│           ├── http_api.py
+│           ├── chat_service.py   # LLM 对话编排（function calling + SSE）
+│           ├── chat_tools.py     # LLM 工具白名单
+│           ├── stream_hub.py     # Redis 流式事件中转
+│           ├── resume_parser.py / embedding.py / translator.py
+│           └── fetchers/         # remoteok / remotive / jobicy / himalayas
 ```
 
 新增 Agent 的实现步骤和示例见 [接入新的 Agent](adding-agents.md)。兼职招聘业务的产品与规则设计见 [全球兼职职位匹配 Agent](global-part-time-agent.md)。
@@ -365,5 +391,5 @@ src/
 | 动作白名单 | 限制攻击面并支持能力发现 | 保留，不应移除 |
 | Agent 自管幂等 | 不同 Agent 的事务边界不同 | 增加平台执行记录，但业务幂等仍归 Agent |
 | 兼容 `/api/v1` | 避免重构破坏现有客户端 | 客户端全部迁移后再版本化下线 |
-| SQLite JSON 实体 | 适合快速验证领域流程 | 并发写、复杂查询或正式部署 |
+| PostgreSQL 结构化表 + pgvector 同库 | 向量与业务状态天然一致、幂等有唯一约束和事务锁 | 向量量级触及单库瓶颈时拆独立向量库（检索接口已隔离在仓储层） |
 | 插件加载默认关闭 | Python 插件拥有进程级权限 | 隔离 worker 和签名供应链成熟后 |
