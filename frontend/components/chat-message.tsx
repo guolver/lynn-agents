@@ -1,3 +1,6 @@
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
 import { MatchCard } from './match-card';
 
 type ToolData = {
@@ -81,11 +84,18 @@ export function ChatMessage({
               </div>
               <div className="chat-file-info">
                 <div className="chat-file-name">{fileData.name}</div>
-                <div className="chat-file-meta">{formatFileSize(fileData.size)}</div>
+                {fileData.size > 0 && <div className="chat-file-meta">{formatFileSize(fileData.size)}</div>}
               </div>
             </div>
           )}
-          {content && <div className="chat-msg-content">{content}</div>}
+          {content &&
+            (isUser ? (
+              <div className="chat-msg-content">{content}</div>
+            ) : (
+              <div className="chat-msg-content chat-msg-md">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              </div>
+            ))}
           {matchCards && (
             <div className="chat-msg-matches">
               {matchCards.map((m, i) => (
