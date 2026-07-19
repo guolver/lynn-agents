@@ -21,11 +21,13 @@ from .core.contracts import (
     ActionNotFoundError,
     Agent,
     AgentNotFoundError,
+    AuthorizationError,
     DuplicateAgentError,
     InvalidInvocationError,
 )
 from .core.discovery import discover_agents
 from .core.registry import AgentRegistry
+from .core.security import IdentityMiddleware, SecuritySettings
 from .database.config import create_repository
 
 load_dotenv()
@@ -39,6 +41,7 @@ def create_app(
     extra_agents: Iterable[Agent] = (),
     load_plugins: bool = False,
     allowed_plugins: Iterable[str] | None = None,
+    security_settings: SecuritySettings | None = None,
 ) -> FastAPI:
     """创建一个完整应用，并显式组装依赖。
 
@@ -46,6 +49,7 @@ def create_app(
     测试也可以传入内存仓储，避免隐式修改全局数据库。
     """
 
+    settings = security_settings or SecuritySettings.from_env()
     repo = repository or create_repository()
     expand_fn = None
     neo4j_driver = None
@@ -159,6 +163,12 @@ def create_app(
         description="统一发现、治理和调用多个业务 Agent；保留兼职 Agent 的兼容 API。",
         lifespan=lifespan,
     )
+    application.add_middleware(
+        IdentityMiddleware,
+        mode=settings.mode,
+        gateway_secret=settings.gateway_secret,
+        development_default_roles=settings.development_default_roles,
+    )
     application.state.agent_registry = registry
     application.state.part_time_repository = repo
     application.state.part_time_service = part_time_service
@@ -266,6 +276,10 @@ def create_app(
     @application.exception_handler(DuplicateAgentError)
     def platform_invalid(_request: Any, exc: ValueError) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    @application.exception_handler(AuthorizationError)
+    def platform_forbidden(_request: Any, exc: AuthorizationError) -> JSONResponse:
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     @application.exception_handler(NotFoundError)
     def domain_not_found(_request: Any, exc: NotFoundError) -> JSONResponse:

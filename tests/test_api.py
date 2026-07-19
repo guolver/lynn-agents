@@ -21,25 +21,20 @@ class APISmokeTest(unittest.TestCase):
     def test_write_headers_and_idempotency(self):
         source = source_payload()
         missing_headers = self.client.post("/api/v1/sources", json=source)
-        self.assertEqual(missing_headers.status_code, 422)
+        self.assertEqual(missing_headers.status_code, 401)
         self.assertEqual(
             missing_headers.json(),
-            {
-                "detail": [
-                    {
-                        "type": "missing",
-                        "loc": ["header", "Idempotency-Key"],
-                        "msg": "Field required",
-                        "input": None,
-                    },
-                    {
-                        "type": "missing",
-                        "loc": ["header", "X-Actor"],
-                        "msg": "Field required",
-                        "input": None,
-                    },
-                ]
-            },
+            {"detail": "trusted gateway authentication required"},
+        )
+        authenticated_without_key = self.client.post(
+            "/api/v1/sources",
+            json=source,
+            headers={"X-Actor": "operator"},
+        )
+        self.assertEqual(authenticated_without_key.status_code, 422)
+        self.assertEqual(
+            authenticated_without_key.json()["detail"][0]["loc"],
+            ["header", "Idempotency-Key"],
         )
         headers = {"Idempotency-Key": "source-create-001", "X-Actor": "operator"}
         first = self.client.post("/api/v1/sources", json=source, headers=headers)
@@ -50,11 +45,12 @@ class APISmokeTest(unittest.TestCase):
         self.assertEqual(len(self.repository.list("source")), 1)
 
     def test_platform_discovers_and_invokes_agent(self):
-        catalog = self.client.get("/platform/v1/agents")
+        headers = {"X-Actor": "operator"}
+        catalog = self.client.get("/platform/v1/agents", headers=headers)
         self.assertEqual(catalog.status_code, 200)
         self.assertEqual(catalog.json()[0]["agent_id"], "global-part-time")
 
-        detail = self.client.get("/platform/v1/agents/global-part-time").json()
+        detail = self.client.get("/platform/v1/agents/global-part-time", headers=headers).json()
         self.assertIn("find_matches", {action["name"] for action in detail["actions"]})
 
         response = self.client.post(
@@ -74,7 +70,7 @@ class APISmokeTest(unittest.TestCase):
         )
 
     def test_not_found_detail_shape(self):
-        response = self.client.get("/api/v1/jobs/missing-job")
+        response = self.client.get("/api/v1/jobs/missing-job", headers={"X-Actor": "operator"})
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "job missing-job not found"})
@@ -141,7 +137,11 @@ class JobsCategoryFilterTest(unittest.TestCase):
             self.repository.put("job", job)
 
     def test_list_jobs_filters_by_category(self):
-        response = self.client.get("/api/v1/jobs", params={"category": "Developer"})
+        response = self.client.get(
+            "/api/v1/jobs",
+            params={"category": "Developer"},
+            headers={"X-Actor": "operator"},
+        )
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["total"], 2)
@@ -150,7 +150,7 @@ class JobsCategoryFilterTest(unittest.TestCase):
         )
 
     def test_list_job_categories_aggregated(self):
-        response = self.client.get("/api/v1/jobs/categories")
+        response = self.client.get("/api/v1/jobs/categories", headers={"X-Actor": "operator"})
         self.assertEqual(response.status_code, 200)
         cats = response.json()["categories"]
         self.assertEqual(cats[0], {"name": "Developer", "count": 2})

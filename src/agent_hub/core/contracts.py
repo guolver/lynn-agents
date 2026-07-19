@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from .security import Principal, Role
+
 
 ActionMode = Literal["read", "write"]
 RiskLevel = Literal["low", "medium", "high"]
@@ -42,6 +44,7 @@ class ActionDefinition:
     risk_level: RiskLevel = "low"
     requires_idempotency_key: bool = False
     input_schema: dict[str, Any] = field(default_factory=dict)
+    allowed_roles: frozenset[Role] = frozenset({Role.ADMIN, Role.OPERATOR, Role.USER})
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -55,11 +58,18 @@ class ExecutionContext:
     tenant_id、roles 和 trace 信息，而无需改变各动作的业务输入。
     """
 
-    actor: str
+    principal: Principal
     request_id: str
     idempotency_key: str | None = None
-    tenant_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def actor(self) -> str:
+        return self.principal.actor_id
+
+    @property
+    def tenant_id(self) -> str:
+        return self.principal.tenant_id
 
 
 @runtime_checkable
@@ -95,3 +105,6 @@ class DuplicateAgentError(AgentPlatformError):
 class InvalidInvocationError(AgentPlatformError):
     pass
 
+
+class AuthorizationError(AgentPlatformError):
+    pass

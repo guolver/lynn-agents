@@ -5,11 +5,12 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..core.contracts import ExecutionContext
 from ..core.registry import AgentRegistry
+from ..core.security import Principal, get_principal
 
 
 class InvokeRequest(BaseModel):
@@ -19,11 +20,9 @@ class InvokeRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-Actor = Annotated[str, Header(alias="X-Actor", min_length=1, max_length=200)]
 IdempotencyKey = Annotated[
     str | None, Header(alias="Idempotency-Key", min_length=8, max_length=200)
 ]
-TenantId = Annotated[str | None, Header(alias="X-Tenant-Id", max_length=100)]
 RequestId = Annotated[str | None, Header(alias="X-Request-Id", max_length=200)]
 
 
@@ -45,16 +44,14 @@ def create_platform_router(registry: AgentRegistry) -> APIRouter:
         agent_id: str,
         action_name: str,
         body: InvokeRequest,
-        actor: Actor,
+        principal: Principal = Depends(get_principal),
         idempotency_key: IdempotencyKey = None,
-        tenant_id: TenantId = None,
         request_id: RequestId = None,
     ) -> dict[str, Any]:
         context = ExecutionContext(
-            actor=actor,
+            principal=principal,
             request_id=request_id or str(uuid.uuid4()),
             idempotency_key=idempotency_key,
-            tenant_id=tenant_id,
         )
         result = registry.invoke(agent_id, action_name, body.payload, context)
         return {
@@ -65,4 +62,3 @@ def create_platform_router(registry: AgentRegistry) -> APIRouter:
         }
 
     return router
-
