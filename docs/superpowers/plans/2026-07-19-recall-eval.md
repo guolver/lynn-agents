@@ -39,7 +39,7 @@
 - [ ] **Step 2: 校验 JSON 合法且 qrels 引用一致**
 
 Run: `python -c "import json; d=json.load(open('scripts/eval_dataset.json')); jids={j['id'] for j in d['jobs']}; assert all(set(v)<=jids for v in d['qrels'].values()); assert set(d['paraphrase_candidates'])<={c['id'] for c in d['candidates']}; print(len(d['jobs']),'jobs',len(d['candidates']),'candidates OK')"`
-Expected: `22 jobs 8 candidates OK`
+Expected: `30 jobs 8 candidates OK`
 
 - [ ] **Step 3: Commit**
 
@@ -372,6 +372,8 @@ git commit --no-verify -o docs/recall-eval-report.md -m "docs(eval): recall eval
 ---
 
 ## 附录 A：`scripts/eval_dataset.json` 完整内容
+
+> 注：数据集以 scripts/eval_dataset.json 为准——质量审查后修订：+8 个域内干扰职位（共 30）、qrels 补标 2 处、data-platform 标题去除字面 "data"。
 
 ```json
 {

@@ -1,6 +1,6 @@
 {
   "jobs": [
-    {"id": "eval-job-data-platform", "title_original": "Data Collection Platform Engineer", "company_name": "HarvestWorks", "description_original": "Build large-scale web harvesting infrastructure with anti-bot mitigation, rotating proxies and distributed queue processing.", "skills": ["Golang", "Kafka"], "categories": ["data"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 70},
+    {"id": "eval-job-data-platform", "title_original": "Web Harvesting Platform Engineer", "company_name": "HarvestWorks", "description_original": "Build large-scale web harvesting infrastructure with anti-bot mitigation, rotating proxies and distributed queue processing.", "skills": ["Golang", "Kafka"], "categories": ["data"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 70},
     {"id": "eval-job-etl", "title_original": "ETL Pipeline Developer", "company_name": "FlowData", "description_original": "Ingest, deduplicate and normalize third-party feeds into a warehouse; schedule and monitor batch workflows.", "skills": ["SQL", "Airflow"], "categories": ["data"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 65},
     {"id": "eval-job-platform-sre", "title_original": "Platform Reliability Engineer", "company_name": "OrbitOps", "description_original": "Operate container orchestration clusters, write Helm charts, manage service mesh and rollout strategies.", "skills": ["Helm", "Prometheus"], "categories": ["devops"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 75},
     {"id": "eval-job-cloud-infra", "title_original": "Cloud Infrastructure Engineer", "company_name": "SkyStack", "description_original": "Design infrastructure as code, autoscaling groups and multi-region deployments on public cloud.", "skills": ["Terraform", "AWS"], "categories": ["devops"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 78},
@@ -21,7 +21,15 @@
     {"id": "eval-job-hr", "title_original": "HR Coordinator", "company_name": "PeopleFirst", "description_original": "Coordinate interviews, onboarding and employee records.", "skills": ["HR operations"], "categories": ["hr"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 42},
     {"id": "eval-job-gamedev", "title_original": "Game Developer", "company_name": "PixelQuest", "description_original": "Gameplay programming in Unity, physics and shaders.", "skills": ["Unity", "C#"], "categories": ["games"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 66},
     {"id": "eval-job-java", "title_original": "Java Enterprise Developer", "company_name": "MonolithSoft", "description_original": "Maintain Spring Boot services and enterprise integrations.", "skills": ["Java", "Spring"], "categories": ["backend"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 68},
-    {"id": "eval-job-security", "title_original": "Security Analyst", "company_name": "ShieldDesk", "description_original": "Triage alerts, run vulnerability scans and improve detection rules.", "skills": ["SIEM"], "categories": ["security"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 74}
+    {"id": "eval-job-security", "title_original": "Security Analyst", "company_name": "ShieldDesk", "description_original": "Triage alerts, run vulnerability scans and improve detection rules.", "skills": ["SIEM"], "categories": ["security"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 74},
+    {"id": "eval-job-bi-analyst", "title_original": "Business Intelligence Analyst", "company_name": "InsightBoard", "description_original": "Build dashboards and reporting models; translate business questions into SQL analyses.", "skills": ["SQL", "Tableau"], "categories": ["data"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 58},
+    {"id": "eval-job-dba", "title_original": "Database Administrator", "company_name": "SafeStore", "description_original": "Manage backups, replication and performance tuning for relational databases.", "skills": ["MySQL"], "categories": ["data"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 62},
+    {"id": "eval-job-cv-engineer", "title_original": "Computer Vision Engineer", "company_name": "SightLine", "description_original": "Train object detection models and optimize image processing pipelines for edge devices.", "skills": ["OpenCV"], "categories": ["ai"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 82},
+    {"id": "eval-job-annotation", "title_original": "Data Annotation Coordinator", "company_name": "LabelHouse", "description_original": "Coordinate labeling teams, write annotation guidelines and audit quality.", "skills": ["annotation"], "categories": ["operations"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 38},
+    {"id": "eval-job-wordpress", "title_original": "WordPress Site Builder", "company_name": "PageCraft", "description_original": "Assemble marketing sites with page builders, themes and plugins.", "skills": ["WordPress"], "categories": ["web"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 40},
+    {"id": "eval-job-embedded", "title_original": "Embedded Firmware Engineer", "company_name": "ChipWorks", "description_original": "Write firmware in C for microcontrollers and debug hardware interfaces.", "skills": ["C", "RTOS"], "categories": ["embedded"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 72},
+    {"id": "eval-job-qa", "title_original": "QA Automation Engineer", "company_name": "GreenCheck", "description_original": "Maintain end-to-end test suites with Playwright and CI quality gates.", "skills": ["Playwright"], "categories": ["qa"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 56},
+    {"id": "eval-job-devrel", "title_original": "Developer Advocate", "company_name": "APIWave", "description_original": "Write tutorials, speak at meetups and gather developer feedback for a platform product.", "skills": ["technical writing"], "categories": ["devrel"], "countries_allowed": ["GLOBAL"], "languages": ["en"], "compensation_max": 60}
   ],
   "candidates": [
     {"id": "eval-cand-crawler", "country": "CN", "timezone": "Asia/Shanghai", "skills": ["分布式爬虫", "数据抓取", "Scrapy"], "desired_roles": ["data"], "languages": [{"code": "en"}], "weekly_hours_available": 20},
@@ -36,10 +44,10 @@
   "qrels": {
     "eval-cand-crawler": ["eval-job-data-platform", "eval-job-etl"],
     "eval-cand-k8s": ["eval-job-platform-sre", "eval-job-cloud-infra"],
-    "eval-cand-frontend-cn": ["eval-job-frontend-generic", "eval-job-fullstack-ui", "eval-job-react-dev"],
+    "eval-cand-frontend-cn": ["eval-job-frontend-generic", "eval-job-fullstack-ui", "eval-job-react-dev", "eval-job-nextjs"],
     "eval-cand-nlp": ["eval-job-ml-search", "eval-job-llm-app"],
     "eval-cand-python": ["eval-job-python-backend", "eval-job-api-dev"],
-    "eval-cand-react": ["eval-job-react-dev", "eval-job-nextjs", "eval-job-frontend-generic"],
+    "eval-cand-react": ["eval-job-react-dev", "eval-job-nextjs", "eval-job-frontend-generic", "eval-job-fullstack-ui"],
     "eval-cand-designer": ["eval-job-ui-designer"],
     "eval-cand-marketing": ["eval-job-seo", "eval-job-content"]
   },
