@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-from .repository import RepositoryProtocol
+from ...core.security import Principal, Role, get_principal, require_roles
+from .chat_service import ChatService
+from .repository import RepositoryProtocol, TenantRepositoryProtocol
 from .service import AgentService
 
 
@@ -167,21 +170,71 @@ class UnsubscribeRequest(APIModel):
 
 IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)]
 Actor = Annotated[str, Header(alias="X-Actor", min_length=1, max_length=200)]
+RequestId = Annotated[str | None, Header(alias="X-Request-Id", max_length=200)]
 
 router = APIRouter(prefix="/api/v1", tags=["global-part-time-legacy"])
 
 
-def get_repository(request: Request) -> RepositoryProtocol:
-    """从当前应用读取仓储，避免多个 app/测试实例共享模块级可变状态。"""
-    return request.app.state.part_time_repository
+def get_tenant_repository(
+    request: Request, principal: Principal = Depends(get_principal)
+) -> TenantRepositoryProtocol:
+    """Carve a tenant-scoped view out of the app's root repository for this
+    request's Principal. Every route below reads/writes through this scoped
+    view rather than the raw root repository, so no route can read or write
+    another tenant's data even by accident.
+    """
+    return request.app.state.part_time_repository.for_tenant(principal.tenant_id)
 
 
-def get_service(request: Request) -> AgentService:
-    return request.app.state.part_time_service
+def get_service(
+    request: Request,
+    repository: TenantRepositoryProtocol = Depends(get_tenant_repository),
+    principal: Principal = Depends(get_principal),
+    request_id: RequestId = None,
+) -> AgentService:
+    """Build a request-scoped AgentService carrying this request's Principal
+    (for owner checks and audit enrichment) — replaces the old fixed
+    ``request.app.state.part_time_service`` singleton that every request used
+    to share regardless of who was calling.
+    """
+    return AgentService(
+        repository,
+        expand_fn=getattr(request.app.state, "expand_fn", None),
+        embed_fn=getattr(request.app.state, "embed_fn", None),
+        principal=principal,
+        request_id=request_id or str(uuid.uuid4()),
+    )
 
 
-RepositoryDep = Annotated[RepositoryProtocol, Depends(get_repository)]
+def get_chat_service(
+    request: Request,
+    repository: TenantRepositoryProtocol = Depends(get_tenant_repository),
+    principal: Principal = Depends(get_principal),
+    request_id: RequestId = None,
+) -> ChatService:
+    """Build a request-scoped ChatService — replaces the old fixed
+    ``request.app.state.chat_service`` singleton. Owner checks on chat
+    sessions (see ChatService._owned_session) depend on this being scoped to
+    the calling Principal.
+    """
+    service = AgentService(
+        repository,
+        expand_fn=getattr(request.app.state, "expand_fn", None),
+        embed_fn=getattr(request.app.state, "embed_fn", None),
+        principal=principal,
+        request_id=request_id or str(uuid.uuid4()),
+    )
+    return ChatService(
+        service=service,
+        repo=repository,
+        tracer=getattr(request.app.state, "chat_tracer", None),
+        principal=principal,
+    )
+
+
+RepositoryDep = Annotated[TenantRepositoryProtocol, Depends(get_tenant_repository)]
 ServiceDep = Annotated[AgentService, Depends(get_service)]
+ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
 
 
 def dump(model: BaseModel, *, exclude_none: bool = False) -> dict[str, Any]:
@@ -203,12 +256,15 @@ def create_source(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> dict[str, Any]:
     return once(repository, "source.create", key, lambda: service.create_source(dump(body), actor))
 
 
 @router.get("/sources")
-def list_sources(repository: RepositoryDep) -> list[dict[str, Any]]:
+def list_sources(
+    repository: RepositoryDep, _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN)
+) -> list[dict[str, Any]]:
     return repository.list("source")
 
 
@@ -220,6 +276,7 @@ def review_source(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> dict[str, Any]:
     return once(
         repository,
@@ -238,6 +295,7 @@ def sync_source(
     request: Request,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> dict[str, Any]:
     jobs = [dump(job) for job in body.jobs]
     if _celery_available(request):
@@ -261,13 +319,20 @@ def sync_source(
 
 
 @router.get("/candidates")
-def list_candidates(repository: RepositoryDep) -> list[dict[str, Any]]:
+def list_candidates(
+    repository: RepositoryDep, _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN)
+) -> list[dict[str, Any]]:
+    # Bulk/ops view across every candidate — not a "personal candidate"
+    # route, so it's gated by role only (like GET /notifications) rather
+    # than owner-scoped like GET /candidates/{id}.
     return repository.list("candidate")
 
 
 @router.get("/notifications")
 def list_notifications(
-    repository: RepositoryDep, status: str | None = None
+    repository: RepositoryDep,
+    status: str | None = None,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> list[dict[str, Any]]:
     notifications = repository.list("notification")
     if status:
@@ -322,6 +387,7 @@ def review_job(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> dict[str, Any]:
     return once(
         repository,
@@ -393,6 +459,7 @@ def create_candidate(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ) -> dict[str, Any]:
     return once(
         repository, "candidate.create", key, lambda: service.create_candidate(dump(body), actor)
@@ -400,7 +467,13 @@ def create_candidate(
 
 
 @router.get("/candidates/{candidate_id}")
-def get_candidate(candidate_id: str, service: ServiceDep) -> dict[str, Any]:
+def get_candidate(
+    candidate_id: str,
+    service: ServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
+) -> dict[str, Any]:
+    # service.get_candidate() applies the owner check (404s on cross-owner
+    # access) — the role gate alone would let any USER read any candidate.
     return service.get_candidate(candidate_id)
 
 
@@ -412,6 +485,7 @@ def update_candidate(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ) -> dict[str, Any]:
     changes = body.model_dump(mode="json", exclude_unset=True)
     return once(
@@ -430,6 +504,7 @@ def set_consent(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ) -> dict[str, Any]:
     return once(
         repository,
@@ -446,6 +521,7 @@ def delete_candidate(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ) -> dict[str, Any]:
     return once(
         repository,
@@ -464,7 +540,11 @@ def run_matches(
     repository: RepositoryDep,
     service: ServiceDep,
     sync: bool = False,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> dict[str, Any]:
+    # Ops/bulk matching trigger, not a "personal candidate" route — end
+    # users get matches for their own candidate via chat's internal
+    # service.run_matches() call, which never goes through this REST route.
     if not sync and _celery_available(request):
         from agent_hub.worker.tasks import run_matches_task
 
@@ -486,7 +566,11 @@ def run_matches(
 
 
 @router.get("/candidates/{candidate_id}/matches")
-def candidate_matches(candidate_id: str, service: ServiceDep) -> list[dict[str, Any]]:
+def candidate_matches(
+    candidate_id: str,
+    service: ServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
+) -> list[dict[str, Any]]:
     return service.candidate_matches(candidate_id)
 
 
@@ -498,6 +582,7 @@ def match_feedback(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ) -> dict[str, Any]:
     return once(
         repository,
@@ -515,6 +600,7 @@ def preview_digest(
     request: Request,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> dict[str, Any]:
     base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
     if _celery_available(request):
@@ -547,6 +633,7 @@ def review_notification(
     actor: Actor,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> dict[str, Any]:
     return once(
         repository,
@@ -564,6 +651,7 @@ def send_notification(
     request: Request,
     repository: RepositoryDep,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
 ) -> dict[str, Any]:
     if _celery_available(request):
         from agent_hub.worker.tasks import send_notification_task
@@ -593,11 +681,16 @@ def unsubscribe(
     service: ServiceDep,
     actor: Actor = "self-service",
 ) -> dict[str, Any]:
+    # Public self-service flow (e.g. an unsubscribe link in an email): the
+    # caller is intentionally not the candidate's owner, so no extra role
+    # requirement and the owner check is explicitly bypassed.
     return once(
         repository,
         f"candidate.unsubscribe:{body.candidate_id}",
         key,
-        lambda: service.set_consent(body.candidate_id, False, actor, "unsubscribe"),
+        lambda: service.set_consent(
+            body.candidate_id, False, actor, "unsubscribe", enforce_owner=False
+        ),
     )
 
 
@@ -607,6 +700,7 @@ def upload_resume(
     actor: Actor,
     request: Request,
     service: ServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ) -> dict[str, Any]:
     _logger = logging.getLogger(__name__)
 
@@ -710,7 +804,9 @@ def get_task_status(task_id: str, request: Request) -> dict[str, Any]:
 
 @router.get("/audit")
 def audit_log(
-    repository: RepositoryDep, limit: int = Query(default=100, ge=1, le=1000)
+    repository: RepositoryDep,
+    limit: int = Query(default=100, ge=1, le=1000),
+    _principal: Principal = require_roles(Role.ADMIN),
 ) -> list[dict[str, Any]]:
     return repository.audits(limit)
 
@@ -725,20 +821,30 @@ class ChatMessageRequest(APIModel):
 
 
 @router.post("/chat/sessions", status_code=201)
-def create_chat_session(request: Request, actor: Actor) -> dict[str, Any]:
-    chat_svc = request.app.state.chat_service
+def create_chat_session(
+    actor: Actor,
+    chat_svc: ChatServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
+) -> dict[str, Any]:
     return chat_svc.create_session(actor=actor)
 
 
 @router.get("/chat/sessions")
-def list_chat_sessions(request: Request) -> list[dict[str, Any]]:
-    chat_svc = request.app.state.chat_service
+def list_chat_sessions(
+    chat_svc: ChatServiceDep, _principal: Principal = require_roles(Role.USER, Role.ADMIN)
+) -> list[dict[str, Any]]:
+    # Scoped to the caller's own sessions (ChatService.list_sessions), not a
+    # tenant-wide listing — otherwise any USER could enumerate every other
+    # user's chat sessions within the tenant.
     return chat_svc.list_sessions()
 
 
 @router.get("/chat/sessions/{session_id}")
-def get_chat_session(session_id: str, request: Request) -> dict[str, Any]:
-    chat_svc = request.app.state.chat_service
+def get_chat_session(
+    session_id: str,
+    chat_svc: ChatServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
+) -> dict[str, Any]:
     result = chat_svc.get_session(session_id)
     if result is None:
         return JSONResponse(status_code=404, content={"detail": "Session not found"})
@@ -746,8 +852,11 @@ def get_chat_session(session_id: str, request: Request) -> dict[str, Any]:
 
 
 @router.delete("/chat/sessions/{session_id}")
-def delete_chat_session(session_id: str, request: Request):
-    chat_svc = request.app.state.chat_service
+def delete_chat_session(
+    session_id: str,
+    chat_svc: ChatServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
+):
     found = chat_svc.delete_session(session_id)
     if not found:
         return JSONResponse(status_code=404, content={"detail": "Session not found"})
@@ -773,12 +882,16 @@ def send_chat_message(
     session_id: str,
     body: ChatMessageRequest,
     request: Request,
+    chat_svc: ChatServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ):
-    chat_svc = request.app.state.chat_service
     hub = getattr(request.app.state, "stream_hub", None)
 
     # 生成与连接解耦：后台线程写 StreamHub，本响应只是其中一个消费者。
     # 客户端断开（切页面、刷新）不影响生成，且可通过 GET /stream 重连续传。
+    # start_streaming() checks session ownership synchronously before
+    # spawning the background thread, so a cross-owner call 404s here
+    # instead of silently starting to generate into someone else's session.
     if hub is not None and hub.available():
         stream_id = chat_svc.start_streaming(session_id, body.content, hub)
         return _sse_response(hub.replay_and_follow(stream_id))
@@ -788,9 +901,19 @@ def send_chat_message(
 
 
 @router.get("/chat/sessions/{session_id}/stream")
-def resume_chat_stream(session_id: str, request: Request):
+def resume_chat_stream(
+    session_id: str,
+    request: Request,
+    chat_svc: ChatServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
+):
     """重连进行中的回答：从头重放已生成部分并继续跟读；无活跃流返回 204。"""
     from fastapi import Response
+
+    # Raises NotFoundError (-> 404 via the app-level exception handler) if
+    # the session doesn't exist or isn't owned by this principal, before we
+    # ever touch the stream hub.
+    chat_svc._owned_session(session_id)
 
     hub = getattr(request.app.state, "stream_hub", None)
     if hub is None or not hub.available():
@@ -807,9 +930,9 @@ def upload_chat_resume(
     file: UploadFile,
     request: Request,
     actor: Actor,
+    chat_svc: ChatServiceDep,
+    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ):
-    chat_svc = request.app.state.chat_service
-
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         return JSONResponse(status_code=422, content={"detail": "仅支持 PDF 文件"})
 

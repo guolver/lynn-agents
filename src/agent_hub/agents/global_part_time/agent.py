@@ -12,7 +12,7 @@ from ...core.contracts import (
     ExecutionContext,
     InvalidInvocationError,
 )
-from .repository import RepositoryProtocol
+from .repository import RootRepositoryProtocol
 from .service import AgentService
 
 
@@ -75,9 +75,19 @@ class GlobalPartTimeAgent:
         ),
     )
 
-    def __init__(self, service: AgentService, repository: RepositoryProtocol):
-        self.service = service
+    def __init__(
+        self,
+        repository: RootRepositoryProtocol,
+        expand_fn: Callable[[list[str]], set[str]] | None = None,
+        embed_fn: Callable[[str], list[float] | None] | None = None,
+    ):
+        # Root, unscoped repository: every invocation carves out its own
+        # tenant-scoped view (and a matching request-scoped AgentService) from
+        # context.principal.tenant_id, rather than sharing one fixed service
+        # across every tenant/actor — see invoke() below.
         self.repository = repository
+        self.expand_fn = expand_fn
+        self.embed_fn = embed_fn
 
     def actions(self) -> tuple[ActionDefinition, ...]:
         return self._actions
@@ -85,28 +95,38 @@ class GlobalPartTimeAgent:
     def invoke(
         self, action: str, payload: dict[str, Any], context: ExecutionContext
     ) -> dict[str, Any]:
+        repo = self.repository.for_tenant(context.tenant_id)
+        service = AgentService(
+            repo,
+            expand_fn=self.expand_fn,
+            embed_fn=self.embed_fn,
+            principal=context.principal,
+            request_id=context.request_id,
+        )
         handlers: dict[str, Callable[[], dict[str, Any]]] = {
-            "list_sources": lambda: self._list_sources(payload),
-            "sync_source": lambda: self._sync_source(payload, context),
-            "validate_job": lambda: self._validation_result(self._required(payload, "job_id", str)),
-            "find_matches": lambda: self.service.run_matches(
+            "list_sources": lambda: self._list_sources(payload, repo),
+            "sync_source": lambda: self._sync_source(payload, context, service),
+            "validate_job": lambda: self._validation_result(
+                self._required(payload, "job_id", str), service
+            ),
+            "find_matches": lambda: service.run_matches(
                 self._required(payload, "candidate_id", str),
                 context.actor,
                 self._limit(payload),
             ),
-            "draft_digest": lambda: self.service.preview_digest(
+            "draft_digest": lambda: service.preview_digest(
                 self._required(payload, "candidate_id", str),
                 self._required(payload, "match_ids", list),
                 context.actor,
                 os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/"),
             ),
-            "request_approval": lambda: self.service.request_approval(
+            "request_approval": lambda: service.request_approval(
                 self._required(payload, "action", str),
                 self._required(payload, "target_id", str),
                 self._optional_dict(payload, "details"),
                 context.actor,
             ),
-            "send_digest": lambda: self.service.send_notification(
+            "send_digest": lambda: service.send_notification(
                 self._required(payload, "notification_id", str), context.actor
             ),
         }
@@ -119,12 +139,13 @@ class GlobalPartTimeAgent:
             return handler()
         # 各 Agent 自己选择幂等存储；平台只负责要求调用者提供幂等键。
         assert context.idempotency_key is not None
-        return self.repository.idempotent(
+        return repo.idempotent(
             f"agent:{self.manifest.agent_id}:{action}", context.idempotency_key, handler
         )
 
-    def _validation_result(self, job_id: str) -> dict[str, Any]:
-        job = self.service.get_job(job_id)
+    @staticmethod
+    def _validation_result(job_id: str, service: AgentService) -> dict[str, Any]:
+        job = service.get_job(job_id)
         return {
             "job_id": job_id,
             "status": job["status"],
@@ -135,12 +156,15 @@ class GlobalPartTimeAgent:
             "rule_version": job["rule_version"],
         }
 
-    def _sync_source(self, payload: dict[str, Any], context: ExecutionContext) -> dict[str, Any]:
-        source_id = self._required(payload, "source_id", str)
-        jobs = self._required(payload, "jobs", list)
+    @staticmethod
+    def _sync_source(
+        payload: dict[str, Any], context: ExecutionContext, service: AgentService
+    ) -> dict[str, Any]:
+        source_id = GlobalPartTimeAgent._required(payload, "source_id", str)
+        jobs = GlobalPartTimeAgent._required(payload, "jobs", list)
         if not all(isinstance(job, dict) for job in jobs):
             raise InvalidInvocationError("payload.jobs must contain objects")
-        return self.service.sync_source(source_id, jobs, context.actor)
+        return service.sync_source(source_id, jobs, context.actor)
 
     @staticmethod
     def _limit(payload: dict[str, Any]) -> int:
@@ -156,12 +180,13 @@ class GlobalPartTimeAgent:
             raise InvalidInvocationError(f"payload.{field} must be an object")
         return value
 
-    def _list_sources(self, payload: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _list_sources(payload: dict[str, Any], repo: Any) -> dict[str, Any]:
         # Agent 工具默认只暴露已批准来源；运营兼容 API 仍可查看全部审核状态。
         review_status = payload.get("review_status", "approved")
         sources = [
             source
-            for source in self.repository.list("source")
+            for source in repo.list("source")
             if review_status == "all" or source.get("review_status") == review_status
         ]
         return {"sources": sources}
