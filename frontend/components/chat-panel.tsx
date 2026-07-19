@@ -494,6 +494,11 @@ export function ChatPanel({
     }
   }
 
+  function handleGenerateKit(jobId: string, title: string) {
+    setSelectedJobId(null);
+    sendPrompt(`请为岗位「${title}」（ID: ${jobId}）生成申请材料`);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -542,6 +547,7 @@ export function ChatPanel({
               toolData={msg.toolData}
               fileData={msg.fileData}
               onCardClick={setSelectedJobId}
+              onGenerateKit={handleGenerateKit}
               isStreaming={
                 isStreaming && msg.id === messages[messages.length - 1]?.id && msg.role === 'assistant'
               }
@@ -625,7 +631,13 @@ export function ChatPanel({
         <div className="chat-disclaimer">Agent Hub 可能会出错。请核实重要信息。</div>
       </div>
 
-      {selectedJobId && <JobDetailDrawer jobId={selectedJobId} onClose={() => setSelectedJobId(null)} />}
+      {selectedJobId && (
+        <JobDetailDrawer
+          jobId={selectedJobId}
+          onClose={() => setSelectedJobId(null)}
+          onGenerateKit={(title) => handleGenerateKit(selectedJobId, title)}
+        />
+      )}
     </div>
   );
 }
