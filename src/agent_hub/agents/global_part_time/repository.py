@@ -74,7 +74,17 @@ class RepositoryProtocol(Protocol):
         self, action: str, key: str, operation: Callable[[], dict[str, Any]]
     ) -> dict[str, Any]: ...
 
+    def search_jobs(
+        self,
+        q: str | None = None,
+        work_mode: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[int, list[dict[str, Any]]]: ...
+
     def list_by_session(self, session_id: str) -> list[dict[str, Any]]: ...
+
+    def delete_by_session(self, session_id: str) -> None: ...
 
 
 class SQLiteRepository:
@@ -132,6 +142,31 @@ class SQLiteRepository:
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
+    def search_jobs(
+        self,
+        q: str | None = None,
+        work_mode: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Search jobs with keyword and work_mode filtering, return (total, paged_jobs)."""
+        all_jobs = self.list("job")
+        filtered = all_jobs
+        if q:
+            q_lower = q.lower()
+            filtered = [
+                j
+                for j in filtered
+                if q_lower in (j.get("title_original") or "").lower()
+                or q_lower in (j.get("company_name") or "").lower()
+                or q_lower in (j.get("title_zh") or "").lower()
+            ]
+        if work_mode:
+            filtered = [j for j in filtered if j.get("work_mode") == work_mode]
+        total = len(filtered)
+        paged = filtered[offset : offset + limit]
+        return total, paged
+
     def list_by_session(self, session_id: str) -> list[dict[str, Any]]:
         """Return all chat messages for a session, ordered by creation time ascending."""
         with self.connection() as conn:
@@ -144,6 +179,21 @@ class SQLiteRepository:
     def delete(self, kind: str, entity_id: str) -> None:
         with self.connection() as conn:
             conn.execute("DELETE FROM entities WHERE kind=? AND id=?", (kind, entity_id))
+
+    def delete_by_session(self, session_id: str) -> None:
+        """Delete a chat session and all its messages."""
+        with self.connection() as conn:
+            # Fetch message IDs for this session, then delete them
+            rows = conn.execute(
+                "SELECT id, payload FROM entities WHERE kind='chat_message'"
+            ).fetchall()
+            for row in rows:
+                msg = json.loads(row[1])
+                if msg.get("session_id") == session_id:
+                    conn.execute(
+                        "DELETE FROM entities WHERE kind='chat_message' AND id=?", (row[0],)
+                    )
+            conn.execute("DELETE FROM entities WHERE kind='chat_session' AND id=?", (session_id,))
 
     def audit(
         self,

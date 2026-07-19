@@ -100,6 +100,7 @@ _TYPED_COLUMNS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     },
     "chat_session": lambda p: {
         "candidate_id": p.get("candidate_id"),
+        "title": p.get("title"),
         "actor": p.get("actor", "anonymous"),
         "status": p.get("status", "active"),
     },
@@ -294,6 +295,64 @@ class PostgresRepository:
             if owns_session:
                 session.rollback()
             raise
+        finally:
+            if owns_session:
+                session.close()
+
+    def delete_by_session(self, session_id: str) -> None:
+        """Delete a chat session and all its messages."""
+        session = self._session()
+        owns_session = not self._is_context_session()
+        try:
+            # Delete messages first
+            session.execute(
+                text("DELETE FROM chat_messages WHERE session_id = :sid"),
+                {"sid": session_id},
+            )
+            # Delete the session
+            session.execute(
+                text("DELETE FROM chat_sessions WHERE id = :sid"),
+                {"sid": session_id},
+            )
+            if owns_session:
+                session.commit()
+            else:
+                session.flush()
+        except Exception:
+            if owns_session:
+                session.rollback()
+            raise
+        finally:
+            if owns_session:
+                session.close()
+
+    def search_jobs(
+        self,
+        q: str | None = None,
+        work_mode: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Search jobs with keyword and work_mode filtering using SQL-level filters."""
+        session = self._session()
+        owns_session = not self._is_context_session()
+        try:
+            stmt = select(Job).where(Job.status == "active")
+            if q:
+                pattern = f"%{q}%"
+                stmt = stmt.where(
+                    Job.title_original.ilike(pattern) | Job.company_name.ilike(pattern)
+                )
+            if work_mode:
+                stmt = stmt.where(Job.payload["work_mode"].astext == work_mode)
+            count_stmt = select(text("count(*)")).select_from(stmt.subquery())
+            total = session.execute(count_stmt).scalar() or 0
+            rows = (
+                session.execute(stmt.order_by(Job.created_at.desc()).offset(offset).limit(limit))
+                .scalars()
+                .all()
+            )
+            return int(total), [self._row_to_dict(row, "job") for row in rows]
         finally:
             if owns_session:
                 session.close()

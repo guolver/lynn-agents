@@ -277,15 +277,24 @@ def list_notifications(
 
 @router.get("/jobs")
 def list_jobs(
-    repository: RepositoryDep, status: str | None = None, review_status: str | None = None
-) -> list[dict[str, Any]]:
-    jobs = repository.list("job")
-    return [
-        job
-        for job in jobs
-        if (not status or job.get("status") == status)
-        and (not review_status or job.get("review_status") == review_status)
-    ]
+    repository: RepositoryDep,
+    status: str | None = None,
+    review_status: str | None = None,
+    q: str | None = None,
+    work_mode: str | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict[str, Any]:
+    total, jobs = repository.search_jobs(q=q, work_mode=work_mode, offset=offset, limit=limit)
+    # Apply legacy filters if provided
+    if status or review_status:
+        jobs = [
+            job
+            for job in jobs
+            if (not status or job.get("status") == status)
+            and (not review_status or job.get("review_status") == review_status)
+        ]
+    return {"total": total, "offset": offset, "limit": limit, "jobs": jobs}
 
 
 @router.get("/jobs/{job_id}")
