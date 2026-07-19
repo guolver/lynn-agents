@@ -45,32 +45,37 @@ def _load_migration() -> ModuleType:
 class _RecordingOp:
     def __init__(self, duplicate_query: str | None = None) -> None:
         self.calls: list[tuple] = []
+        self.events: list[tuple] = []
         self.duplicate_query = duplicate_query
         self.queries: list[str] = []
 
+    def _record_call(self, call: tuple) -> None:
+        self.calls.append(call)
+        self.events.append(call)
+
     def add_column(self, table_name, column):
-        self.calls.append(("add_column", table_name, column))
+        self._record_call(("add_column", table_name, column))
 
     def execute(self, statement):
-        self.calls.append(("execute", str(statement)))
+        self._record_call(("execute", str(statement)))
 
     def drop_constraint(self, name, table_name, type_):
-        self.calls.append(("drop_constraint", name, table_name, type_))
+        self._record_call(("drop_constraint", name, table_name, type_))
 
     def create_unique_constraint(self, name, table_name, columns):
-        self.calls.append(("create_unique_constraint", name, table_name, tuple(columns)))
+        self._record_call(("create_unique_constraint", name, table_name, tuple(columns)))
 
     def alter_column(self, table_name, column_name, **kwargs):
-        self.calls.append(("alter_column", table_name, column_name, kwargs))
+        self._record_call(("alter_column", table_name, column_name, kwargs))
 
     def create_table(self, table_name, *columns, **kwargs):
-        self.calls.append(("create_table", table_name, columns, kwargs))
+        self._record_call(("create_table", table_name, columns, kwargs))
 
     def drop_table(self, table_name):
-        self.calls.append(("drop_table", table_name))
+        self._record_call(("drop_table", table_name))
 
     def drop_column(self, table_name, column_name):
-        self.calls.append(("drop_column", table_name, column_name))
+        self._record_call(("drop_column", table_name, column_name))
 
     def get_bind(self):
         return self
@@ -85,7 +90,9 @@ class _RecordingBind:
         self.recorder = recorder
 
     def execute(self, statement):
-        self.recorder.queries.append(str(statement))
+        query = str(statement)
+        self.recorder.queries.append(query)
+        self.recorder.events.append(("guard", query))
         return self.recorder
 
 
@@ -136,11 +143,51 @@ def test_upgrade_backfills_before_enforcing_non_null(monkeypatch):
     assert workflow_non_null < command_table
 
 
-def test_downgrade_refuses_cross_tenant_duplicates(monkeypatch):
+def test_downgrade_restores_global_schema_after_all_guards(monkeypatch):
     migration = _load_migration()
-    duplicate_query = (
-        "SELECT dedup_key FROM jobs GROUP BY dedup_key HAVING COUNT(DISTINCT tenant_id) > 1 LIMIT 1"
-    )
+    recorder = _RecordingOp()
+    recorder.get_bind = lambda: _RecordingBind(recorder)
+    monkeypatch.setattr(migration, "op", recorder)
+
+    migration.downgrade()
+
+    guard_events = [("guard", query) for _, query in migration.DOWNGRADE_DUPLICATE_QUERIES]
+    expected_ddl = [
+        ("drop_table", "workflow_command_payloads"),
+        ("drop_table", "workflow_commands"),
+        ("drop_constraint", "uq_jobs_tenant_dedup_key", "jobs", "unique"),
+        ("create_unique_constraint", "uq_jobs_dedup_key", "jobs", ("dedup_key",)),
+        ("drop_constraint", "uq_matches_tenant_candidate_job", "matches", "unique"),
+        (
+            "create_unique_constraint",
+            "uq_matches_candidate_job",
+            "matches",
+            ("candidate_id", "job_id"),
+        ),
+        (
+            "drop_constraint",
+            "uq_idempotency_tenant_action_key",
+            "idempotency_records",
+            "unique",
+        ),
+        (
+            "create_unique_constraint",
+            "uq_idempotency_records_action_key",
+            "idempotency_records",
+            ("action", "key"),
+        ),
+        ("drop_column", "candidates", "owner_actor_id"),
+        *(("drop_column", table_name, "tenant_id") for table_name in reversed(TENANT_TABLES)),
+    ]
+    assert recorder.queries == [query for _, query in migration.DOWNGRADE_DUPLICATE_QUERIES]
+    assert recorder.calls == expected_ddl
+    assert recorder.events == guard_events + expected_ddl
+
+
+@pytest.mark.parametrize("guard_index", range(3))
+def test_downgrade_refuses_each_cross_tenant_duplicate_before_ddl(monkeypatch, guard_index):
+    migration = _load_migration()
+    duplicate_query = migration.DOWNGRADE_DUPLICATE_QUERIES[guard_index][1]
     recorder = _RecordingOp(duplicate_query=duplicate_query)
     recorder.get_bind = lambda: _RecordingBind(recorder)
     monkeypatch.setattr(migration, "op", recorder)
@@ -148,7 +195,9 @@ def test_downgrade_refuses_cross_tenant_duplicates(monkeypatch):
     with pytest.raises(RuntimeError, match="cross-tenant duplicates"):
         migration.downgrade()
 
-    assert duplicate_query in recorder.queries
+    assert recorder.queries == [
+        query for _, query in migration.DOWNGRADE_DUPLICATE_QUERIES[: guard_index + 1]
+    ]
     assert recorder.calls == []
 
 
@@ -182,6 +231,26 @@ def test_postgresql_upgrade_backfills_and_downgrades():
         assert {"workflow_commands", "workflow_command_payloads"}.issubset(
             upgraded.get_table_names()
         )
+        upgraded_constraints = {
+            table_name: {
+                item["name"]: tuple(item["column_names"])
+                for item in upgraded.get_unique_constraints(table_name)
+            }
+            for table_name in ("jobs", "matches", "idempotency_records")
+        }
+        assert upgraded_constraints == {
+            "jobs": {"uq_jobs_tenant_dedup_key": ("tenant_id", "dedup_key")},
+            "matches": {
+                "uq_matches_tenant_candidate_job": (
+                    "tenant_id",
+                    "candidate_id",
+                    "job_id",
+                )
+            },
+            "idempotency_records": {
+                "uq_idempotency_tenant_action_key": ("tenant_id", "action", "key")
+            },
+        }
         with engine.connect() as connection:
             row = connection.execute(
                 text(
@@ -192,12 +261,24 @@ def test_postgresql_upgrade_backfills_and_downgrades():
 
         command.downgrade(config, "20260718_0006")
         downgraded = inspect(engine)
+        assert "workflow_commands" not in downgraded.get_table_names()
+        assert "workflow_command_payloads" not in downgraded.get_table_names()
         assert "tenant_id" not in {column["name"] for column in downgraded.get_columns("jobs")}
         assert "owner_actor_id" not in {
             column["name"] for column in downgraded.get_columns("candidates")
         }
-        job_constraints = {item["name"] for item in downgraded.get_unique_constraints("jobs")}
-        assert "uq_jobs_dedup_key" in job_constraints
+        downgraded_constraints = {
+            table_name: {
+                item["name"]: tuple(item["column_names"])
+                for item in downgraded.get_unique_constraints(table_name)
+            }
+            for table_name in ("jobs", "matches", "idempotency_records")
+        }
+        assert downgraded_constraints == {
+            "jobs": {"uq_jobs_dedup_key": ("dedup_key",)},
+            "matches": {"uq_matches_candidate_job": ("candidate_id", "job_id")},
+            "idempotency_records": {"uq_idempotency_records_action_key": ("action", "key")},
+        }
     finally:
         command.upgrade(config, "head")
         engine.dispose()
