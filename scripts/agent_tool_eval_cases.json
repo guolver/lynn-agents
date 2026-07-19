@@ -1,0 +1,237 @@
+{
+  "comment": "Agent 工具选择评测集。expected_tools 为可接受的首个工具名集合，'no_tool' 表示应直接回答不调用工具。expected_args 中值为 null 表示只要求参数存在，'$CANDIDATE' 会替换为用例绑定的 candidate_id。",
+  "cases": [
+    {
+      "id": "search-01",
+      "category": "search_jobs",
+      "user_message": "有没有适合 Python 后端的远程兼职？帮我搜一下",
+      "expected_tools": ["search_jobs"]
+    },
+    {
+      "id": "search-02",
+      "category": "search_jobs",
+      "user_message": "找一下时薪 50 美元以上的前端职位",
+      "expected_tools": ["search_jobs"],
+      "expected_args": { "min_pay": 50 }
+    },
+    {
+      "id": "search-03",
+      "category": "search_jobs",
+      "user_message": "看看美国地区有什么设计类岗位",
+      "expected_tools": ["search_jobs"],
+      "expected_args": { "country": "US" }
+    },
+    {
+      "id": "search-04",
+      "category": "search_jobs",
+      "user_message": "有 React 相关的工作吗？",
+      "expected_tools": ["search_jobs"],
+      "expected_args": { "keyword": null }
+    },
+    {
+      "id": "search-05",
+      "category": "search_jobs",
+      "user_message": "帮我浏览一下现在有哪些远程的数据分析职位",
+      "expected_tools": ["search_jobs"]
+    },
+    {
+      "id": "match-01",
+      "category": "run_matches",
+      "candidate_id": "cand-eval-001",
+      "user_message": "根据我的简历帮我推荐合适的岗位",
+      "expected_tools": ["run_matches"],
+      "expected_args": { "candidate_id": "$CANDIDATE" }
+    },
+    {
+      "id": "match-02",
+      "category": "run_matches",
+      "candidate_id": "cand-eval-001",
+      "user_message": "重新帮我匹配一次职位",
+      "expected_tools": ["run_matches"],
+      "expected_args": { "candidate_id": "$CANDIDATE" }
+    },
+    {
+      "id": "match-03",
+      "category": "run_matches",
+      "candidate_id": "cand-eval-001",
+      "user_message": "有没有跟我技能匹配度高的新工作？",
+      "expected_tools": ["run_matches"]
+    },
+    {
+      "id": "match-04",
+      "category": "run_matches",
+      "candidate_id": "cand-eval-001",
+      "user_message": "给我推荐 5 个最合适的职位",
+      "expected_tools": ["run_matches"],
+      "expected_args": { "limit": 5 }
+    },
+    {
+      "id": "prefs-01",
+      "category": "update_preferences",
+      "candidate_id": "cand-eval-001",
+      "user_message": "把我的最低时薪改成 30 美元",
+      "expected_tools": ["update_preferences"],
+      "expected_args": { "candidate_id": "$CANDIDATE", "changes": null }
+    },
+    {
+      "id": "prefs-02",
+      "category": "update_preferences",
+      "candidate_id": "cand-eval-001",
+      "user_message": "我现在也可以接受混合办公了，帮我更新一下",
+      "expected_tools": ["update_preferences"],
+      "expected_args": { "changes": null }
+    },
+    {
+      "id": "prefs-03",
+      "category": "update_preferences",
+      "candidate_id": "cand-eval-001",
+      "user_message": "以后不要再给我推荐 Acme Corp 这家公司的职位了",
+      "expected_tools": ["update_preferences"],
+      "expected_args": { "changes": null }
+    },
+    {
+      "id": "prefs-04",
+      "category": "update_preferences",
+      "candidate_id": "cand-eval-001",
+      "user_message": "把我的时区改成 Asia/Shanghai",
+      "expected_tools": ["update_preferences"],
+      "expected_args": { "changes": null }
+    },
+    {
+      "id": "profile-01",
+      "category": "get_my_profile",
+      "candidate_id": "cand-eval-001",
+      "user_message": "我现在的偏好设置是什么？",
+      "expected_tools": ["get_my_profile"],
+      "expected_args": { "candidate_id": "$CANDIDATE" }
+    },
+    {
+      "id": "profile-02",
+      "category": "get_my_profile",
+      "candidate_id": "cand-eval-001",
+      "user_message": "你那边存的我的技能列表是什么样的？",
+      "expected_tools": ["get_my_profile"]
+    },
+    {
+      "id": "profile-03",
+      "category": "get_my_profile",
+      "candidate_id": "cand-eval-001",
+      "user_message": "看下我资料里的薪资要求是多少",
+      "expected_tools": ["get_my_profile"]
+    },
+    {
+      "id": "detail-01",
+      "category": "get_job_detail",
+      "candidate_id": "cand-eval-001",
+      "history": [
+        {
+          "role": "assistant",
+          "content": "为你匹配到 2 个岗位：\n1. Senior Python Engineer @ Nova Labs（job_id: job-aaa-111，$55/h）\n2. Frontend Developer @ Orbit Inc（job_id: job-bbb-222，$40/h）"
+        }
+      ],
+      "user_message": "第一个职位的具体要求是什么？",
+      "expected_tools": ["get_job_detail"],
+      "expected_args": { "job_id": "job-aaa-111" }
+    },
+    {
+      "id": "detail-02",
+      "category": "get_job_detail",
+      "candidate_id": "cand-eval-001",
+      "history": [
+        {
+          "role": "assistant",
+          "content": "为你匹配到 2 个岗位：\n1. Senior Python Engineer @ Nova Labs（job_id: job-aaa-111，$55/h）\n2. Frontend Developer @ Orbit Inc（job_id: job-bbb-222，$40/h）"
+        }
+      ],
+      "user_message": "详细介绍一下 Frontend Developer 那个岗位",
+      "expected_tools": ["get_job_detail"],
+      "expected_args": { "job_id": "job-bbb-222" }
+    },
+    {
+      "id": "detail-03",
+      "category": "get_job_detail",
+      "history": [
+        {
+          "role": "assistant",
+          "content": "搜索到职位：Data Analyst @ Metric Co（job_id: job-ccc-333）"
+        }
+      ],
+      "user_message": "job-ccc-333 这个岗位的薪资和工时是多少？",
+      "expected_tools": ["get_job_detail"],
+      "expected_args": { "job_id": "job-ccc-333" }
+    },
+    {
+      "id": "resume-01",
+      "category": "parse_resume",
+      "user_message": "这是我的简历：张三，5 年 Python 后端开发经验，熟悉 Django、FastAPI、PostgreSQL，英语流利，期望远程工作，最低时薪 25 美元。帮我建立档案",
+      "expected_tools": ["parse_resume"],
+      "expected_args": { "pdf_text": null }
+    },
+    {
+      "id": "resume-02",
+      "category": "parse_resume",
+      "user_message": "我把简历文字发给你：李四，前端工程师，3 年 React/TypeScript 经验，会一点 Node.js，坐标上海，找远程兼职。帮我解析一下",
+      "expected_tools": ["parse_resume"],
+      "expected_args": { "pdf_text": null }
+    },
+    {
+      "id": "notool-01",
+      "category": "no_tool",
+      "user_message": "你好",
+      "expected_tools": ["no_tool"]
+    },
+    {
+      "id": "notool-02",
+      "category": "no_tool",
+      "user_message": "你能帮我做什么？",
+      "expected_tools": ["no_tool"]
+    },
+    {
+      "id": "notool-03",
+      "category": "no_tool",
+      "user_message": "远程工作怎么克服时差问题？给点建议",
+      "expected_tools": ["no_tool"]
+    },
+    {
+      "id": "notool-04",
+      "category": "no_tool",
+      "user_message": "谢谢你，今天先到这里",
+      "expected_tools": ["no_tool"]
+    },
+    {
+      "id": "notool-05",
+      "category": "no_tool",
+      "user_message": "写简历的时候应该突出哪些内容比较好？",
+      "expected_tools": ["no_tool"]
+    },
+    {
+      "id": "notool-06",
+      "category": "no_tool",
+      "user_message": "什么是时薪制兼职？和项目制有什么区别？",
+      "expected_tools": ["no_tool"]
+    },
+    {
+      "id": "edge-01",
+      "category": "edge",
+      "user_message": "帮我推荐适合我的职位",
+      "expected_tools": ["no_tool", "search_jobs"],
+      "note": "无候选人档案：引导上传简历（no_tool）或退化为通用搜索均可接受；直接编造 candidate_id 调 run_matches 算错"
+    },
+    {
+      "id": "edge-02",
+      "category": "edge",
+      "candidate_id": "cand-eval-001",
+      "user_message": "先把我的最低时薪调到 40 美元，然后看看有什么新职位",
+      "expected_tools": ["update_preferences"],
+      "note": "多意图：应先执行偏好修改，再谈匹配"
+    },
+    {
+      "id": "edge-03",
+      "category": "edge",
+      "candidate_id": "cand-eval-001",
+      "user_message": "把所有匹配到的职位都用邮件发给我",
+      "expected_tools": ["no_tool", "run_matches"],
+      "note": "对话工具里没有发邮件能力：解释做不到（no_tool）或先跑匹配再说明均可接受；不允许幻觉出不存在的发送工具"
+    }
+  ]
+}
