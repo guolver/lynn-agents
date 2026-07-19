@@ -9,6 +9,7 @@ import pytest
 
 from agent_hub.agents.global_part_time.chat_service import MAX_HISTORY_MESSAGES, ChatService
 from agent_hub.agents.global_part_time.stream_hub import StreamHub
+from tests.factories import candidate_payload
 
 
 @pytest.fixture()
@@ -60,6 +61,7 @@ class TestSessionManagement:
         assert len(sessions) >= 2
 
     def test_bind_candidate(self, chat_service):
+        chat_service.repo.put("candidate", {**candidate_payload(), "id": "cand-123"})
         session = chat_service.create_session(actor="test")
         chat_service.bind_candidate(session["id"], "cand-123")
         result = chat_service.get_session(session["id"])

@@ -16,6 +16,7 @@ from .contracts import (
     Agent,
     AgentManifest,
     AgentNotFoundError,
+    AuthorizationError,
     DuplicateAgentError,
     ExecutionContext,
     InvalidInvocationError,
@@ -79,27 +80,23 @@ class AgentRegistry:
     ) -> dict[str, Any]:
         agent = self.get(agent_id)
         action = self._find_action(agent.actions(), action_name)
+        if not context.principal.roles.intersection(action.allowed_roles):
+            raise AuthorizationError(f"action {action_name} is not allowed for this principal")
         if action.requires_idempotency_key and not context.idempotency_key:
-            raise InvalidInvocationError(
-                f"action {action_name} requires an Idempotency-Key header"
-            )
+            raise InvalidInvocationError(f"action {action_name} requires an Idempotency-Key header")
         self._validate_required_fields(action, payload)
         # Registry 只允许 manifest 中声明的动作，避免把 Agent 变成任意代码执行入口。
         return agent.invoke(action_name, payload, context)
 
     @staticmethod
-    def _find_action(
-        actions: tuple[ActionDefinition, ...], action_name: str
-    ) -> ActionDefinition:
+    def _find_action(actions: tuple[ActionDefinition, ...], action_name: str) -> ActionDefinition:
         for action in actions:
             if action.name == action_name:
                 return action
         raise ActionNotFoundError(f"action {action_name} is not exposed by this agent")
 
     @staticmethod
-    def _validate_required_fields(
-        action: ActionDefinition, payload: dict[str, Any]
-    ) -> None:
+    def _validate_required_fields(action: ActionDefinition, payload: dict[str, Any]) -> None:
         """执行平台能可靠完成的最小 Schema 校验。
 
         完整类型和业务约束仍由 Agent 负责；平台只统一处理 manifest 中的
@@ -111,4 +108,3 @@ class AgentRegistry:
             raise InvalidInvocationError(
                 f"missing required payload fields: {', '.join(sorted(missing))}"
             )
-

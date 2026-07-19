@@ -10,6 +10,15 @@ except Exception:
     pass
 
 
+def _driver_for(container):
+    from agent_hub.skill_graph.config import create_neo4j_driver
+
+    return create_neo4j_driver(
+        container.get_connection_url(),
+        auth=(container.username, container.password),
+    )
+
+
 class SeedAliasValidationTest(unittest.TestCase):
     def test_aliases_are_globally_unique(self):
         from agent_hub.skill_graph.seed import SKILL_GRAPH_SEED
@@ -33,18 +42,12 @@ class Neo4jConfigTest(unittest.TestCase):
     def setUpClass(cls):
         cls.container = Neo4jContainer("neo4j:5")
         cls.container.start()
-        cls.bolt_url = cls.container.get_connection_url()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.container.stop()
+        cls.addClassCleanup(cls.container.stop)
+        cls.driver = _driver_for(cls.container)
+        cls.addClassCleanup(cls.driver.close)
 
     def test_create_driver_connects(self):
-        from agent_hub.skill_graph.config import create_neo4j_driver
-
-        driver = create_neo4j_driver(self.bolt_url, auth=("neo4j", "test"))
-        driver.verify_connectivity()
-        driver.close()
+        self.driver.verify_connectivity()
 
 
 @unittest.skipUnless(NEO4J_AVAILABLE, "testcontainers[neo4j] or Docker not available")
@@ -53,11 +56,7 @@ class SeedDataTest(unittest.TestCase):
     def setUpClass(cls):
         cls.container = Neo4jContainer("neo4j:5")
         cls.container.start()
-        cls.bolt_url = cls.container.get_connection_url()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.container.stop()
+        cls.addClassCleanup(cls.container.stop)
 
     def test_seed_data_structure_is_valid(self):
         from agent_hub.skill_graph.seed import SKILL_GRAPH_SEED
@@ -85,18 +84,13 @@ class SkillGraphServiceTest(unittest.TestCase):
     def setUpClass(cls):
         cls.container = Neo4jContainer("neo4j:5")
         cls.container.start()
-        bolt_url = cls.container.get_connection_url()
-        from agent_hub.skill_graph.config import create_neo4j_driver
+        cls.addClassCleanup(cls.container.stop)
         from agent_hub.skill_graph.service import SkillGraphService
 
-        cls.driver = create_neo4j_driver(bolt_url, auth=("neo4j", "test"))
+        cls.driver = _driver_for(cls.container)
+        cls.addClassCleanup(cls.driver.close)
         cls.service = SkillGraphService(cls.driver)
         cls.service.seed()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.driver.close()
-        cls.container.stop()
 
     def test_resolve_canonical_returns_self(self):
         self.assertEqual(self.service.resolve("React"), "React")
@@ -138,18 +132,13 @@ class EndToEndSkillMatchTest(unittest.TestCase):
     def setUpClass(cls):
         cls.container = Neo4jContainer("neo4j:5")
         cls.container.start()
-        bolt_url = cls.container.get_connection_url()
-        from agent_hub.skill_graph.config import create_neo4j_driver
+        cls.addClassCleanup(cls.container.stop)
         from agent_hub.skill_graph.service import SkillGraphService
 
-        cls.driver = create_neo4j_driver(bolt_url, auth=("neo4j", "test"))
+        cls.driver = _driver_for(cls.container)
+        cls.addClassCleanup(cls.driver.close)
         cls.service = SkillGraphService(cls.driver)
         cls.service.seed()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.driver.close()
-        cls.container.stop()
 
     def test_alias_improves_match_score(self):
         from agent_hub.agents.global_part_time.domain import score_match

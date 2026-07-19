@@ -6,6 +6,8 @@ import uuid
 
 import pytest
 
+from tests.factories import candidate_payload
+
 
 def _new_id() -> str:
     return str(uuid.uuid4())
@@ -46,6 +48,7 @@ class TestChatSessionCRUD:
 
     def test_bind_candidate_to_session(self, repo):
         session_id = _new_id()
+        repo.put("candidate", {**candidate_payload(), "id": "cand-123"})
         repo.put("chat_session", {"id": session_id, "actor": "u1", "status": "active"})
         repo.put(
             "chat_session",

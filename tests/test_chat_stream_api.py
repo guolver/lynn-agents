@@ -24,6 +24,8 @@ def _redis_available() -> bool:
 
 pytestmark = pytest.mark.skipif(not _redis_available(), reason="Redis not available")
 
+ACTOR_HEADERS = {"X-Actor": "stream-test"}
+
 
 @pytest.fixture()
 def client():
@@ -33,7 +35,7 @@ def client():
 
 
 def _create_session(client) -> str:
-    resp = client.post("/api/v1/chat/sessions", headers={"X-Actor": "stream-test"})
+    resp = client.post("/api/v1/chat/sessions", headers=ACTOR_HEADERS)
     assert resp.status_code == 201
     return resp.json()["id"]
 
@@ -63,7 +65,7 @@ def _wait_for(predicate, timeout=5.0):
 
 def test_get_stream_without_active_returns_204(client):
     session_id = _create_session(client)
-    resp = client.get(f"/api/v1/chat/sessions/{session_id}/stream")
+    resp = client.get(f"/api/v1/chat/sessions/{session_id}/stream", headers=ACTOR_HEADERS)
     assert resp.status_code == 204
 
 
@@ -75,7 +77,11 @@ def test_post_message_streams_events_and_clears_active(client, monkeypatch):
         yield {"event": "done", "data": {"message_id": "m1"}}
 
     monkeypatch.setattr(ChatService, "stream_response", fake_stream)
-    resp = client.post(f"/api/v1/chat/sessions/{session_id}/messages", json={"content": "hi"})
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session_id}/messages",
+        json={"content": "hi"},
+        headers=ACTOR_HEADERS,
+    )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
     events = _parse_sse(resp.text)
@@ -84,7 +90,7 @@ def test_post_message_streams_events_and_clears_active(client, monkeypatch):
 
     hub = client.app.state.stream_hub
     assert _wait_for(lambda: hub.get_active(session_id) is None)
-    after = client.get(f"/api/v1/chat/sessions/{session_id}/stream")
+    after = client.get(f"/api/v1/chat/sessions/{session_id}/stream", headers=ACTOR_HEADERS)
     assert after.status_code == 204
 
 
@@ -109,7 +115,10 @@ def test_resume_replays_in_progress_stream(client, monkeypatch):
         # 用定时器在 GET 进行中释放生成端，验证"重放已有内容 + 跟读后续"。
         timer = threading.Timer(0.5, lambda: release.append(True))
         timer.start()
-        resp = client.get(f"/api/v1/chat/sessions/{session_id}/stream")
+        resp = client.get(
+            f"/api/v1/chat/sessions/{session_id}/stream",
+            headers=ACTOR_HEADERS,
+        )
         assert resp.status_code == 200
         collected = _parse_sse(resp.text)
         assert ("delta", '{"content": "前半"}') in collected
