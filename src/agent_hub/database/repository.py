@@ -158,6 +158,11 @@ class PostgresRepository:
         return result
 
     def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]:
+        return self._put(kind, item, tenant_id=None)
+
+    def _put(
+        self, kind: str, item: dict[str, Any], *, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         model_cls = _KIND_MAP.get(kind)
         if model_cls is None:
             raise ValueError(f"unknown entity kind: {kind}")
@@ -165,8 +170,15 @@ class PostgresRepository:
         now = _utcnow()
         item.setdefault("created_at", now)
         item["updated_at"] = now
+        if tenant_id is not None:
+            # Reflect the scope tenant in the JSONB payload too (used by
+            # kinds whose row dict is derived from `payload`).
+            item["tenant_id"] = tenant_id
 
         typed = _TYPED_COLUMNS[kind](item)
+        has_tenant_column = hasattr(model_cls, "tenant_id")
+        if tenant_id is not None and has_tenant_column:
+            typed["tenant_id"] = tenant_id
         natural = _NATURAL_KEYS.get(kind)
         has_payload = self._has_payload(model_cls)
         session = self._session()
@@ -177,14 +189,27 @@ class PostgresRepository:
                 # Use savepoint for natural-key conflict resolution.
                 nk_values = {col: typed[col] for col in natural}
                 if all(nk_values.values()):
-                    existing = session.execute(
-                        select(model_cls).filter_by(**nk_values)
-                    ).scalar_one_or_none()
+                    nk_stmt = select(model_cls).filter_by(**nk_values)
+                    if tenant_id is not None and has_tenant_column:
+                        nk_stmt = nk_stmt.where(model_cls.tenant_id == tenant_id)
+                    existing = session.execute(nk_stmt).scalar_one_or_none()
                     if existing is not None and existing.id != item["id"]:
                         # Return the already-persisted record.
                         return self._row_to_dict(existing, kind)
 
             row = session.get(model_cls, item["id"])
+            if (
+                row is not None
+                and tenant_id is not None
+                and has_tenant_column
+                and row.tenant_id != tenant_id
+            ):
+                # The id belongs to another tenant's row — refuse to overwrite it
+                # instead of silently upserting across the tenant boundary.
+                raise PermissionError(
+                    f"entity {item['id']!r} of kind {kind!r} does not belong to tenant "
+                    f"{tenant_id!r}"
+                )
             if row is not None:
                 if has_payload:
                     row.payload = item
@@ -214,6 +239,11 @@ class PostgresRepository:
                 session.close()
 
     def get(self, kind: str, entity_id: str) -> dict[str, Any] | None:
+        return self._get(kind, entity_id, tenant_id=None)
+
+    def _get(
+        self, kind: str, entity_id: str, *, tenant_id: str | None = None
+    ) -> dict[str, Any] | None:
         model_cls = _KIND_MAP.get(kind)
         if model_cls is None:
             raise ValueError(f"unknown entity kind: {kind}")
@@ -221,13 +251,30 @@ class PostgresRepository:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
+            if kind == "chat_message":
+                row = session.get(ChatMessage, entity_id)
+                if row is not None and tenant_id is not None:
+                    owning = session.get(ChatSession, row.session_id)
+                    if owning is None or owning.tenant_id != tenant_id:
+                        return None
+                return self._row_to_dict(row, kind) if row else None
             row = session.get(model_cls, entity_id)
+            if (
+                row is not None
+                and tenant_id is not None
+                and hasattr(model_cls, "tenant_id")
+                and row.tenant_id != tenant_id
+            ):
+                return None
             return self._row_to_dict(row, kind) if row else None
         finally:
             if owns_session:
                 session.close()
 
     def list(self, kind: str) -> list[dict[str, Any]]:
+        return self._list(kind, tenant_id=None)
+
+    def _list(self, kind: str, *, tenant_id: str | None = None) -> list[dict[str, Any]]:
         model_cls = _KIND_MAP.get(kind)
         if model_cls is None:
             raise ValueError(f"unknown entity kind: {kind}")
@@ -235,11 +282,18 @@ class PostgresRepository:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
-            rows = (
-                session.execute(select(model_cls).order_by(model_cls.created_at.desc()))
-                .scalars()
-                .all()
-            )
+            if kind == "chat_message":
+                stmt = select(ChatMessage).order_by(ChatMessage.created_at.desc())
+                if tenant_id is not None:
+                    stmt = stmt.join(ChatSession, ChatMessage.session_id == ChatSession.id).where(
+                        ChatSession.tenant_id == tenant_id
+                    )
+                rows = session.execute(stmt).scalars().all()
+                return [self._row_to_dict(row, kind) for row in rows]
+            stmt = select(model_cls).order_by(model_cls.created_at.desc())
+            if tenant_id is not None and hasattr(model_cls, "tenant_id"):
+                stmt = stmt.where(model_cls.tenant_id == tenant_id)
+            rows = session.execute(stmt).scalars().all()
             return [self._row_to_dict(row, kind) for row in rows]
         finally:
             if owns_session:
@@ -247,10 +301,18 @@ class PostgresRepository:
 
     def list_by_session(self, session_id: str) -> list[dict[str, Any]]:
         """Return all chat messages for a session, ordered by creation time ascending."""
+        return self._list_by_session(session_id, tenant_id=None)
+
+    def _list_by_session(
+        self, session_id: str, *, tenant_id: str | None = None
+    ) -> list[dict[str, Any]]:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
-            from agent_hub.database.models import ChatMessage
+            if tenant_id is not None:
+                owning = session.get(ChatSession, session_id)
+                if owning is None or owning.tenant_id != tenant_id:
+                    return []
 
             rows = (
                 session.execute(
@@ -279,6 +341,9 @@ class PostgresRepository:
                 session.close()
 
     def delete(self, kind: str, entity_id: str) -> None:
+        self._delete(kind, entity_id, tenant_id=None)
+
+    def _delete(self, kind: str, entity_id: str, *, tenant_id: str | None = None) -> None:
         model_cls = _KIND_MAP.get(kind)
         if model_cls is None:
             raise ValueError(f"unknown entity kind: {kind}")
@@ -286,7 +351,21 @@ class PostgresRepository:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
-            row = session.get(model_cls, entity_id)
+            if kind == "chat_message":
+                row = session.get(ChatMessage, entity_id)
+                if row is not None and tenant_id is not None:
+                    owning = session.get(ChatSession, row.session_id)
+                    if owning is None or owning.tenant_id != tenant_id:
+                        row = None
+            else:
+                row = session.get(model_cls, entity_id)
+                if (
+                    row is not None
+                    and tenant_id is not None
+                    and hasattr(model_cls, "tenant_id")
+                    and row.tenant_id != tenant_id
+                ):
+                    row = None
             if row is not None:
                 session.delete(row)
                 if owns_session:
@@ -303,9 +382,17 @@ class PostgresRepository:
 
     def delete_by_session(self, session_id: str) -> None:
         """Delete a chat session and all its messages."""
+        self._delete_by_session(session_id, tenant_id=None)
+
+    def _delete_by_session(self, session_id: str, *, tenant_id: str | None = None) -> None:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
+            if tenant_id is not None:
+                owning = session.get(ChatSession, session_id)
+                if owning is None or owning.tenant_id != tenant_id:
+                    return  # not this tenant's session: no-op
+
             # Delete messages first
             session.execute(
                 text("DELETE FROM chat_messages WHERE session_id = :sid"),
@@ -337,10 +424,24 @@ class PostgresRepository:
         limit: int = 20,
     ) -> tuple[int, list[dict[str, Any]]]:
         """Search jobs with keyword, work_mode and category filtering using SQL-level filters."""
+        return self._search_jobs(q, work_mode, category, offset, limit, tenant_id=None)
+
+    def _search_jobs(
+        self,
+        q: str | None = None,
+        work_mode: str | None = None,
+        category: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+        *,
+        tenant_id: str | None = None,
+    ) -> tuple[int, list[dict[str, Any]]]:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
             stmt = select(Job).where(Job.status == "active")
+            if tenant_id is not None:
+                stmt = stmt.where(Job.tenant_id == tenant_id)
             if q:
                 pattern = f"%{q}%"
                 stmt = stmt.where(
@@ -364,19 +465,26 @@ class PostgresRepository:
 
     def list_job_categories(self, limit: int = 30) -> list[dict[str, Any]]:
         """活跃职位的类别聚合（按数量降序），用于筛选器选项。"""
+        return self._list_job_categories(limit, tenant_id=None)
+
+    def _list_job_categories(
+        self, limit: int = 30, *, tenant_id: str | None = None
+    ) -> list[dict[str, Any]]:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
-            rows = session.execute(
-                text(
-                    "SELECT cat AS name, count(*) AS count "
-                    "FROM jobs, jsonb_array_elements_text("
-                    "  COALESCE(payload->'categories', '[]'::jsonb)) AS cat "
-                    "WHERE status = 'active' "
-                    "GROUP BY cat ORDER BY count DESC, cat LIMIT :limit"
-                ),
-                {"limit": limit},
-            ).all()
+            query = (
+                "SELECT cat AS name, count(*) AS count "
+                "FROM jobs, jsonb_array_elements_text("
+                "  COALESCE(payload->'categories', '[]'::jsonb)) AS cat "
+                "WHERE status = 'active' "
+            )
+            params: dict[str, Any] = {"limit": limit}
+            if tenant_id is not None:
+                query += "AND tenant_id = :tenant_id "
+                params["tenant_id"] = tenant_id
+            query += "GROUP BY cat ORDER BY count DESC, cat LIMIT :limit"
+            rows = session.execute(text(query), params).all()
             return [{"name": row.name, "count": int(row.count)} for row in rows]
         finally:
             if owns_session:
@@ -390,6 +498,18 @@ class PostgresRepository:
         actor: str,
         details: dict[str, Any] | None = None,
     ) -> None:
+        self._audit(event, kind, entity_id, actor, details, tenant_id=None)
+
+    def _audit(
+        self,
+        event: str,
+        kind: str,
+        entity_id: str,
+        actor: str,
+        details: dict[str, Any] | None = None,
+        *,
+        tenant_id: str | None = None,
+    ) -> None:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
@@ -400,6 +520,7 @@ class PostgresRepository:
                 entity_id=entity_id,
                 actor=actor,
                 details=details,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
             )
             session.add(row)
             if owns_session:
@@ -415,15 +536,22 @@ class PostgresRepository:
                 session.close()
 
     def audits(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._audits(limit, tenant_id=None)
+
+    def _audits(self, limit: int = 100, *, tenant_id: str | None = None) -> list[dict[str, Any]]:
         capped = min(limit, 1000)
         session = self._session()
         owns_session = not self._is_context_session()
         try:
-            rows = (
-                session.execute(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(capped))
-                .scalars()
-                .all()
-            )
+            stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(capped)
+            if tenant_id is not None:
+                stmt = (
+                    select(AuditLog)
+                    .where(AuditLog.tenant_id == tenant_id)
+                    .order_by(AuditLog.created_at.desc())
+                    .limit(capped)
+                )
+            rows = session.execute(stmt).scalars().all()
             return [
                 {
                     "id": row.id,
@@ -448,27 +576,42 @@ class PostgresRepository:
         All repository writes made inside *operation* share the same session
         and transaction, committed atomically with the idempotency record.
         """
+        return self._idempotent(action, key, operation, tenant_id=None)
+
+    def _idempotent(
+        self,
+        action: str,
+        key: str,
+        operation: Callable[[], dict[str, Any]],
+        *,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         session = self._session_factory()
         try:
             session.begin()
 
+            filters: dict[str, Any] = {"action": action, "key": key}
+            if tenant_id is not None:
+                filters["tenant_id"] = tenant_id
+
             # Check for existing record.
             existing = session.execute(
-                select(IdempotencyRecord).filter_by(action=action, key=key)
+                select(IdempotencyRecord).filter_by(**filters)
             ).scalar_one_or_none()
             if existing is not None:
                 session.rollback()
                 return dict(existing.response)
 
             # Acquire advisory lock to prevent concurrent execution.
+            lock_text = f"{action}:{key}" if tenant_id is None else f"{tenant_id}:{action}:{key}"
             lock_key = int.from_bytes(
-                hashlib.sha256(f"{action}:{key}".encode()).digest()[:8], "big", signed=True
+                hashlib.sha256(lock_text.encode()).digest()[:8], "big", signed=True
             )
             session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
 
             # Re-check after acquiring lock.
             existing = session.execute(
-                select(IdempotencyRecord).filter_by(action=action, key=key)
+                select(IdempotencyRecord).filter_by(**filters)
             ).scalar_one_or_none()
             if existing is not None:
                 session.rollback()
@@ -492,6 +635,7 @@ class PostgresRepository:
                     action=action,
                     key=key,
                     response=result,
+                    **({"tenant_id": tenant_id} if tenant_id is not None else {}),
                 )
             )
             session.commit()
@@ -511,20 +655,33 @@ class PostgresRepository:
         self, vec: list[float], limit: int = 200
     ) -> list[tuple[dict[str, Any], float]]:
         """按余弦相似度检索活跃且已向量化的职位，返回 (job_dict, similarity) 降序列表。"""
+        return self._search_jobs_by_embedding(vec, limit, tenant_id=None)
+
+    def _search_jobs_by_embedding(
+        self, vec: list[float], limit: int = 200, *, tenant_id: str | None = None
+    ) -> list[tuple[dict[str, Any], float]]:
         session = self._session()
         owns_session = not self._is_context_session()
         try:
             distance = Job.embedding.cosine_distance(vec)
-            rows = session.execute(
-                select(Job, distance.label("distance"))
-                .where(Job.status == "active", Job.embedding.isnot(None))
-                .order_by(distance)
-                .limit(limit)
-            ).all()
+            stmt = select(Job, distance.label("distance")).where(
+                Job.status == "active", Job.embedding.isnot(None)
+            )
+            if tenant_id is not None:
+                stmt = stmt.where(Job.tenant_id == tenant_id)
+            rows = session.execute(stmt.order_by(distance).limit(limit)).all()
             return [(self._row_to_dict(row.Job, "job"), 1.0 - float(row.distance)) for row in rows]
         finally:
             if owns_session:
                 session.close()
+
+    def for_tenant(self, tenant_id: str) -> "_TenantPostgresRepository":
+        """Return a lightweight view of this repository scoped to *tenant_id*.
+
+        Reuses this repository's engine/session factory — no new engine is
+        created per tenant scope.
+        """
+        return _TenantPostgresRepository(self, tenant_id)
 
     def update_job_embeddings(self, embeddings: dict[str, list[float]]) -> int:
         """批量写入职位向量，返回实际更新条数。"""
@@ -571,3 +728,72 @@ class PostgresRepository:
         finally:
             if owns_session:
                 session.close()
+
+
+class _TenantPostgresRepository:
+    """Tenant-scoped view over a :class:`PostgresRepository`.
+
+    Holds a reference to the parent repository (reusing its engine/session
+    factory — no new engine is opened per tenant scope) plus the tenant_id
+    to filter/stamp on every operation.
+    """
+
+    def __init__(self, root: PostgresRepository, tenant_id: str):
+        self._root = root
+        self.tenant_id = tenant_id
+
+    def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]:
+        return self._root._put(kind, item, tenant_id=self.tenant_id)
+
+    def get(self, kind: str, entity_id: str) -> dict[str, Any] | None:
+        return self._root._get(kind, entity_id, tenant_id=self.tenant_id)
+
+    def list(self, kind: str) -> list[dict[str, Any]]:
+        return self._root._list(kind, tenant_id=self.tenant_id)
+
+    def delete(self, kind: str, entity_id: str) -> None:
+        self._root._delete(kind, entity_id, tenant_id=self.tenant_id)
+
+    def list_by_session(self, session_id: str) -> list[dict[str, Any]]:
+        return self._root._list_by_session(session_id, tenant_id=self.tenant_id)
+
+    def delete_by_session(self, session_id: str) -> None:
+        self._root._delete_by_session(session_id, tenant_id=self.tenant_id)
+
+    def search_jobs(
+        self,
+        q: str | None = None,
+        work_mode: str | None = None,
+        category: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        return self._root._search_jobs(
+            q, work_mode, category, offset, limit, tenant_id=self.tenant_id
+        )
+
+    def list_job_categories(self, limit: int = 30) -> list[dict[str, Any]]:
+        return self._root._list_job_categories(limit, tenant_id=self.tenant_id)
+
+    def audit(
+        self,
+        event: str,
+        kind: str,
+        entity_id: str,
+        actor: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self._root._audit(event, kind, entity_id, actor, details, tenant_id=self.tenant_id)
+
+    def audits(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._root._audits(limit, tenant_id=self.tenant_id)
+
+    def idempotent(
+        self, action: str, key: str, operation: Callable[[], dict[str, Any]]
+    ) -> dict[str, Any]:
+        return self._root._idempotent(action, key, operation, tenant_id=self.tenant_id)
+
+    def search_jobs_by_embedding(
+        self, vec: list[float], limit: int = 200
+    ) -> list[tuple[dict[str, Any], float]]:
+        return self._root._search_jobs_by_embedding(vec, limit, tenant_id=self.tenant_id)
