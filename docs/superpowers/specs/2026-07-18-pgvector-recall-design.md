@@ -101,4 +101,8 @@ match 落库，payload 新增检索证据：
 
 - 候选人向量不落库（每次 run_matches 现算一次，成本一次 API 调用）。
 - 不做双路召回、不做向量列的自动失效/重算策略（职位更新时由 sync 的 embed 步骤覆盖写入）。
-- 不改通知发送（simulation provider）——不在本次范围。
+- 不改通知发送（simulation provider）——不在次范围。
+
+## 已知行为变化（实现后补记）
+
+- pgvector 召回把候选集限定为 top-200：召回窗口之外的职位不再被重新打分，早期 full_scan 生成的旧 match 行会带着旧分数与旧检索证据保留在库中。活跃职位少于 200 时召回覆盖全集、无差异；超过后如需清理可加 prune-on-run 或 TTL（暂不实现）。
