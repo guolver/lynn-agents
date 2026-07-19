@@ -47,6 +47,7 @@ class JobSource(Base):
     __tablename__ = "job_sources"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -110,6 +111,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     source_id: Mapped[str] = mapped_column(String(36), nullable=False)
     dedup_key: Mapped[str] = mapped_column(String(64), nullable=False)
     title_original: Mapped[str] = mapped_column(Text, nullable=False)
@@ -128,7 +130,7 @@ class Job(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("dedup_key", name="uq_jobs_dedup_key"),
+        UniqueConstraint("tenant_id", "dedup_key", name="uq_jobs_tenant_dedup_key"),
         Index("ix_jobs_status", "status"),
         Index("ix_jobs_source_id", "source_id"),
     )
@@ -157,6 +159,8 @@ class Candidate(Base):
     __tablename__ = "candidates"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
+    owner_actor_id: Mapped[str] = mapped_column(String(255), nullable=False, default="legacy-owner")
     country: Mapped[str] = mapped_column(String(10), nullable=False)
     timezone: Mapped[str] = mapped_column(String(50), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -269,6 +273,7 @@ class Match(Base):
     __tablename__ = "matches"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     candidate_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("candidates.id"), nullable=False
     )
@@ -281,7 +286,9 @@ class Match(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("candidate_id", "job_id", name="uq_matches_candidate_job"),
+        UniqueConstraint(
+            "tenant_id", "candidate_id", "job_id", name="uq_matches_tenant_candidate_job"
+        ),
         Index("ix_matches_candidate_id", "candidate_id"),
         Index("ix_matches_job_id", "job_id"),
     )
@@ -324,6 +331,7 @@ class WorkflowRun(Base):
     __tablename__ = "workflow_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     workflow_type: Mapped[str] = mapped_column(String(50), nullable=False)
     target_id: Mapped[str] = mapped_column(String(36), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
@@ -341,6 +349,39 @@ class WorkflowRun(Base):
         Index("ix_workflow_runs_status", "status"),
         Index("ix_workflow_runs_celery_task_id", "celery_task_id"),
     )
+
+
+class WorkflowCommand(Base):
+    __tablename__ = "workflow_commands"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    workflow_run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.id"), nullable=False)
+    celery_task_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending_dispatch")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "action", "idempotency_key", name="uq_workflow_commands_request"
+        ),
+    )
+
+
+class WorkflowCommandPayload(Base):
+    __tablename__ = "workflow_command_payloads"
+
+    command_id: Mapped[str] = mapped_column(ForeignKey("workflow_commands.id"), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class WorkflowStep(Base):
@@ -367,6 +408,7 @@ class Approval(Base):
     __tablename__ = "approvals"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     target_id: Mapped[str] = mapped_column(String(36), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
@@ -388,6 +430,7 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     candidate_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("candidates.id"), nullable=False
     )
@@ -412,6 +455,7 @@ class Feedback(Base):
     __tablename__ = "feedback"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     match_id: Mapped[str] = mapped_column(String(36), ForeignKey("matches.id"), nullable=False)
     candidate_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("candidates.id"), nullable=False
@@ -437,6 +481,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     event: Mapped[str] = mapped_column(String(100), nullable=False)
     kind: Mapped[str] = mapped_column(String(50), nullable=False)
     entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
@@ -456,6 +501,7 @@ class IdempotencyRecord(Base):
     __tablename__ = "idempotency_records"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     key: Mapped[str] = mapped_column(String(255), nullable=False)
     response: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -463,7 +509,9 @@ class IdempotencyRecord(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
-    __table_args__ = (UniqueConstraint("action", "key", name="uq_idempotency_records_action_key"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "action", "key", name="uq_idempotency_tenant_action_key"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +523,7 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
     candidate_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("candidates.id"), nullable=True
     )

@@ -30,6 +30,22 @@ EXPECTED_TABLES = {
     "idempotency_records",
     "chat_sessions",
     "chat_messages",
+    "workflow_commands",
+    "workflow_command_payloads",
+}
+
+TENANT_TABLES = {
+    "job_sources",
+    "jobs",
+    "candidates",
+    "matches",
+    "approvals",
+    "notifications",
+    "feedback",
+    "audit_logs",
+    "idempotency_records",
+    "workflow_runs",
+    "chat_sessions",
 }
 
 
@@ -45,10 +61,11 @@ class DatabaseModelTest(unittest.TestCase):
                 ("canonical_url",),
                 ("content_fingerprint",),
             },
-            "jobs": {("dedup_key",)},
-            "matches": {("candidate_id", "job_id")},
+            "jobs": {("tenant_id", "dedup_key")},
+            "matches": {("tenant_id", "candidate_id", "job_id")},
             "notifications": {("provider_message_id",)},
-            "idempotency_records": {("action", "key")},
+            "idempotency_records": {("tenant_id", "action", "key")},
+            "workflow_commands": {("tenant_id", "action", "idempotency_key")},
         }
         for table_name, required in expected.items():
             table = Base.metadata.tables[table_name]
@@ -86,6 +103,14 @@ class DatabaseModelTest(unittest.TestCase):
                 required_columns.issubset(actual_columns),
                 f"{table_name} missing foreign keys: {required_columns - actual_columns}",
             )
+
+    def test_tenant_columns_and_command_tables(self):
+        for name in TENANT_TABLES:
+            self.assertIn("tenant_id", Base.metadata.tables[name].c)
+            self.assertFalse(Base.metadata.tables[name].c.tenant_id.nullable)
+        self.assertIn("owner_actor_id", Base.metadata.tables["candidates"].c)
+        self.assertIn("workflow_commands", Base.metadata.tables)
+        self.assertIn("workflow_command_payloads", Base.metadata.tables)
 
 
 if __name__ == "__main__":
