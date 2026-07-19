@@ -105,4 +105,5 @@ match 落库，payload 新增检索证据：
 
 ## 已知行为变化（实现后补记）
 
+- 本文中"降级为 semantic=0.5"的表述已过时：后续的 completeness 加权改造（cbe060c）把无语义信息的情况改为"该维度不计入加权"（`_semantic_score` 返回 `(0.0, has_info=False)`），召回相似度可用时行为不变。
 - pgvector 召回把候选集限定为 top-200：召回窗口之外的职位不再被重新打分，早期 full_scan 生成的旧 match 行会带着旧分数与旧检索证据保留在库中。活跃职位少于 200 时召回覆盖全集、无差异；超过后如需清理可加 prune-on-run 或 TTL（暂不实现）。
