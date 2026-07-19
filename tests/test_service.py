@@ -71,6 +71,29 @@ class ServiceWorkflowTest(unittest.TestCase):
         # 未展示岗位不足 limit 时用已展示的按分回填，保证数量
         self.assertEqual(len(second_ids), 2)
 
+    def test_run_matches_keeps_country_and_timezone_mismatches(self):
+        self.service.review_source(self.source["id"], True, "operator")
+        mismatched_job = dict(
+            self.job,
+            countries_allowed=["US"],
+            timezone_requirements=["UTC-05:00"],
+        )
+        self.service.sync_source(self.source["id"], [mismatched_job], "worker")
+        candidate = self.candidate()
+
+        result = self.service.run_matches(candidate["id"], "scheduler")
+
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertEqual(result["matches"][0]["rule_version"], "2026-07-19.1")
+        self.assertNotIn(
+            "country_mismatch",
+            [reason for item in result["filtered"] for reason in item["reasons"]],
+        )
+        self.assertNotIn(
+            "timezone_mismatch",
+            [reason for item in result["filtered"] for reason in item["reasons"]],
+        )
+
     def test_cross_source_duplicate_merges_provenance(self):
         self.service.review_source(self.source["id"], True, "operator")
         first = self.service.sync_source(self.source["id"], [self.job], "worker")

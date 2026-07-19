@@ -15,7 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-RULE_VERSION = "2026-07-18.2"
+RULE_VERSION = "2026-07-19.1"
 SCORE_WEIGHTS = {
     "skills": 0.32,
     "semantic": 0.18,
@@ -175,11 +175,6 @@ def hard_filter(
         failures.append("risk_not_approved")
     if job.get("company_name") in set(candidate.get("excluded_companies") or []):
         failures.append("company_excluded")
-    countries = set(job.get("countries_allowed") or [])
-    if countries and "GLOBAL" not in countries and candidate.get("country") not in countries:
-        failures.append("country_mismatch")
-    if not timezone_matches(candidate.get("timezone"), job.get("timezone_requirements") or []):
-        failures.append("timezone_mismatch")
     modes = set(candidate.get("allowed_work_modes") or [])
     if modes and job.get("work_mode") not in modes:
         failures.append("work_mode_mismatch")

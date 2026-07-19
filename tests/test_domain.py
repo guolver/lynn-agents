@@ -62,14 +62,33 @@ class DomainRulesTest(unittest.TestCase):
         self.assertEqual(breakdown["availability"], 1.0)
         self.assertIn("薪资达到最低期望", reasons)
 
-    def test_hard_filters_are_deterministic(self):
+    def test_country_and_timezone_mismatches_are_soft_constraints(self):
         self.job["countries_allowed"] = ["US"]
         self.job["compensation_max"] = 10
         self.job["timezone_requirements"] = ["UTC-05:00"]
+
         failures = hard_filter(self.candidate, self.job)
-        self.assertIn("country_mismatch", failures)
-        self.assertIn("timezone_mismatch", failures)
+
+        self.assertNotIn("country_mismatch", failures)
+        self.assertNotIn("timezone_mismatch", failures)
         self.assertIn("compensation_below_minimum", failures)
+
+    def test_location_and_timezone_matches_score_higher_without_filtering(self):
+        mismatched = dict(
+            self.job,
+            countries_allowed=["US"],
+            timezone_requirements=["UTC-05:00"],
+        )
+
+        matching_score, matching_breakdown, _ = score_match(self.candidate, self.job)
+        mismatched_score, mismatched_breakdown, _ = score_match(self.candidate, mismatched)
+
+        self.assertEqual(hard_filter(self.candidate, mismatched), [])
+        self.assertGreater(
+            matching_breakdown["location_timezone"],
+            mismatched_breakdown["location_timezone"],
+        )
+        self.assertGreater(matching_score, mismatched_score)
 
     def test_risk_rules_override_content_quality(self):
         risky = dict(self.job, description_original="先付款并提供验证码，然后开始刷单")
