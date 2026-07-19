@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "alembic>=1.16,<2",
+  "argon2-cffi>=23.1,<24",
   "celery[redis]>=5.4,<6",
   "fastapi>=0.115,<1",
   "langfuse>=3,<4",
@@ -18,6 +19,7 @@ dependencies = [
   "pgvector>=0.3,<1",
   "pydantic>=2.9,<3",
   "psycopg[binary]>=3.2,<4",
+  "pyjwt>=2.13,<3",
   "pypdf>=4.0",
   "python-multipart>=0.0.9",
   "sqlalchemy>=2.0,<3",
