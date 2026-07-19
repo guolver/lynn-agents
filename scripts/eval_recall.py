@@ -7,6 +7,7 @@
 
 评测走线上同一路径（真实 embedding API + 真实 pgvector 检索），
 无 API key 或 PG 不可达直接报错退出，不做静默降级。
+注意：评测会向目标库短暂写入 active 状态的测试职位（跑完自动清理），不要指向生产库。
 """
 
 from __future__ import annotations
@@ -103,29 +104,34 @@ def _embed_all_jobs(repo: Any, dataset: dict[str, Any]) -> None:
     repo.update_job_embeddings({job["id"]: vec for job, vec in zip(jobs, vectors)})
 
 
-def _vector_rank(repo: Any, candidate: dict[str, Any], limit: int) -> list[str]:
-    from agent_hub.agents.global_part_time import embedding as embedding_mod
-
-    vec = embedding_mod.get_embedding(embedding_mod.build_candidate_text(candidate))
-    if vec is None:
-        sys.exit(f"候选人 {candidate['id']} embedding 生成失败")
+def _vector_rank(repo: Any, vec: list[float], limit: int) -> list[str]:
     hits = repo.search_jobs_by_embedding(vec, limit)
     # 库里可能有非评测职位（历史数据），只保留评测集内的
     return [job["id"] for job, _sim in hits if job["id"].startswith("eval-job-")]
 
 
 def _evaluate(repo: Any, dataset: dict[str, Any], ks: list[int]) -> dict[str, Any]:
+    from agent_hub.agents.global_part_time import embedding as embedding_mod
+
     jobs = dataset["jobs"]
     qrels = {k: set(v) for k, v in dataset["qrels"].items()}
     paraphrase = set(dataset["paraphrase_candidates"])
-    # 预留窗口：库内历史职位会占据检索名额，limit 放大到评测集外仍足够
-    search_limit = max(ks) + 1000
+    # 检索窗口覆盖库内全部职位，eval 职位不可能被截断
+    search_limit = len(repo.list("job")) + max(ks)
+
+    cand_vecs = embedding_mod.get_embeddings(
+        [embedding_mod.build_candidate_text(c) for c in dataset["candidates"]]
+    )
+    missing = [c["id"] for c, v in zip(dataset["candidates"], cand_vecs) if v is None]
+    if missing:
+        sys.exit(f"候选人 embedding 生成失败：{missing}")
+
     per_candidate: list[dict[str, Any]] = []
-    for cand in dataset["candidates"]:
+    for cand, cand_vec in zip(dataset["candidates"], cand_vecs):
         relevant = qrels[cand["id"]]
         rankings = {
             "keyword": keyword_rank(cand, jobs),
-            "vector": _vector_rank(repo, cand, search_limit),
+            "vector": _vector_rank(repo, cand_vec, search_limit),
         }
         row: dict[str, Any] = {"id": cand["id"], "paraphrase": cand["id"] in paraphrase}
         for method, ranked in rankings.items():
@@ -191,6 +197,8 @@ def main() -> None:
         sys.exit("当前仓储不支持向量检索（需要 PostgreSQL）")
 
     dataset = _load_dataset()
+    # 清理上次异常退出（如 kill -9）可能残留的评测数据
+    _cleanup(repo, dataset)
     try:
         _seed(repo, dataset)
         _embed_all_jobs(repo, dataset)

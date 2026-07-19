@@ -85,5 +85,40 @@ class ParaphrasePurityTest(unittest.TestCase):
             )
 
 
+class AggregateRenderTest(unittest.TestCase):
+    ROWS = [
+        {
+            "id": "c1",
+            "paraphrase": True,
+            "keyword": {"r@5": 0.0, "mrr": 0.0},
+            "vector": {"r@5": 1.0, "mrr": 1.0},
+        },
+        {
+            "id": "c2",
+            "paraphrase": False,
+            "keyword": {"r@5": 1.0, "mrr": 0.5},
+            "vector": {"r@5": 1.0, "mrr": 1.0},
+        },
+    ]
+
+    def test_aggregate_macro_average_and_groups(self):
+        from eval_recall import _aggregate
+
+        table = _aggregate(self.ROWS, [5])
+        by_key = {(g, m): metrics for g, m, metrics in table}
+        self.assertEqual(by_key[("全体(2)", "keyword")]["r@5"], 0.5)
+        self.assertEqual(by_key[("改写子集(1)", "keyword")]["r@5"], 0.0)
+        self.assertEqual(by_key[("改写子集(1)", "vector")]["mrr"], 1.0)
+
+    def test_render_table_shape(self):
+        from eval_recall import _aggregate, _render
+
+        out = _render(_aggregate(self.ROWS, [5]), [5])
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 6)  # header + separator + 4 数据行
+        self.assertIn("Recall@5", lines[0])
+        self.assertIn("MRR", lines[0])
+
+
 if __name__ == "__main__":
     unittest.main()
