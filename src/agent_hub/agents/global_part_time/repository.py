@@ -13,7 +13,7 @@ from typing import Any, Callable, Protocol, runtime_checkable
 
 @runtime_checkable
 class RepositoryProtocol(Protocol):
-    """Storage contract shared by SQLite and PostgreSQL implementations."""
+    """Storage contract shared by the PostgreSQL implementation and the test fake."""
 
     def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]: ...
 
