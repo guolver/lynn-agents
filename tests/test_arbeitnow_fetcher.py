@@ -88,6 +88,9 @@ PAGE_1 = json.dumps(
         "data": [
             {**SAMPLE_RAW, "slug": "job-1", "remote": True},
             {**SAMPLE_RAW, "slug": "job-2", "remote": False},
+            # Distinct title so this fixture doesn't collide with job-1 under
+            # dedup_key() (company/title/countries/description-based) when
+            # both are synced in the same batch.
             {**SAMPLE_RAW, "slug": "job-3", "remote": True, "title": "Data Platform Engineer"},
         ],
         "links": {"next": "https://www.arbeitnow.com/api/job-board-api?page=2"},
