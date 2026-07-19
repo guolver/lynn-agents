@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
@@ -26,6 +27,8 @@ from .core.contracts import (
 from .core.discovery import discover_agents
 from .core.registry import AgentRegistry
 from .database.config import create_repository
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 

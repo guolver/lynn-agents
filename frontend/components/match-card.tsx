@@ -5,6 +5,7 @@ export function MatchCard({
   reasons,
   workMode,
   compensation,
+  onClick,
 }: {
   title: string;
   company: string;
@@ -12,10 +13,26 @@ export function MatchCard({
   reasons: string[];
   workMode?: string;
   compensation?: string;
+  onClick?: () => void;
 }) {
   const pct = Math.round(score * 100);
   return (
-    <div className="match-card">
+    <div
+      className={`match-card${onClick ? ' match-card-clickable' : ''}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="match-card-header">
         <div>
           <div className="match-card-title">{title}</div>

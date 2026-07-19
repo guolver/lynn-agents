@@ -66,6 +66,24 @@ class ChatService:
     def list_sessions(self) -> list[dict[str, Any]]:
         return self.repo.list("chat_session")
 
+    def delete_session(self, session_id: str) -> bool:
+        """Delete a session and all its messages. Returns True if found."""
+        session = self.repo.get("chat_session", session_id)
+        if session is None:
+            return False
+        self.repo.delete_by_session(session_id)
+        return True
+
+    def _set_title_if_empty(self, session_id: str, text: str) -> None:
+        """Set session title from first user message (truncated to 50 chars)."""
+        session = self.repo.get("chat_session", session_id)
+        if session and not session.get("title"):
+            title = text.strip().replace("\n", " ")
+            if len(title) > 50:
+                title = title[:47] + "..."
+            session["title"] = title
+            self.repo.put("chat_session", session)
+
     def bind_candidate(self, session_id: str, candidate_id: str) -> None:
         session = self.repo.get("chat_session", session_id)
         if session:
@@ -92,6 +110,67 @@ class ChatService:
             msg["tool_call_id"] = tool_call_id
         self.repo.put("chat_message", msg)
         return msg
+
+    def run_analysis(
+        self,
+        session_id: str,
+        resume_text: str,
+        actor: str,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """确定性简历流水线：解析 → 建候选人 → opt-in → 绑定会话 → 匹配。
+
+        不依赖 LLM 决定是否调用工具；结果持久化为 assistant + tool 消息，
+        便于刷新后从历史重建匹配卡片。返回富化后的匹配结果。
+        """
+        self._set_title_if_empty(session_id, "简历分析与岗位匹配")
+
+        from .chat_tools import execute_tool
+
+        parse_result = execute_tool(
+            "parse_resume", {"pdf_text": resume_text}, service=self.service, actor=actor
+        )
+        if "error" in parse_result or "candidate" not in parse_result:
+            raise RuntimeError(parse_result.get("error", "简历解析失败"))
+
+        candidate = parse_result["candidate"]
+        candidate_id = candidate["id"]
+        self.bind_candidate(session_id, candidate_id)
+
+        match_result = execute_tool(
+            "run_matches",
+            {"candidate_id": candidate_id, "limit": limit},
+            service=self.service,
+            actor=actor,
+        )
+        matches = match_result.get("matches", [])
+
+        if matches:
+            summary = f"简历解析完成，为你匹配到 {len(matches)} 个岗位："
+        else:
+            summary = (
+                "简历解析完成，但暂时没有匹配到合适的岗位。"
+                "你可以调整偏好（薪资、地区、工作模式）后再试。"
+            )
+
+        assistant_msg = self.add_message(session_id, "assistant", summary)
+        self.add_message(
+            session_id,
+            "tool",
+            json.dumps(
+                {"name": "run_matches", "result": match_result}, ensure_ascii=False, default=str
+            ),
+            tool_call_id=f"chat_match_{assistant_msg['id']}",
+        )
+
+        return {
+            "candidate": candidate,
+            "matches": matches,
+            "matches_count": len(matches),
+            "summary": summary,
+            "message_id": assistant_msg["id"],
+            "parsed_fields": parse_result.get("parsed_fields"),
+        }
 
     def build_llm_messages(
         self,
@@ -140,8 +219,9 @@ class ChatService:
             return
         candidate_id = session.get("candidate_id")
 
-        # Save user message
+        # Save user message and auto-title the session
         self.add_message(session_id, "user", user_message)
+        self._set_title_if_empty(session_id, user_message)
 
         # Build LLM messages
         llm_messages = self.build_llm_messages(session_id, candidate_id)
