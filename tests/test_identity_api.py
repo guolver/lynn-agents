@@ -41,9 +41,9 @@ class TestIdentityApi(unittest.TestCase):
 
     def setUp(self):
         repo = IdentityRepository(self.engine)
-        service = IdentityService(repo, rate_limiter=FakeRateLimiter(), jwt_secret=JWT_SECRET)
+        self.service = IdentityService(repo, rate_limiter=FakeRateLimiter(), jwt_secret=JWT_SECRET)
         app = FastAPI()
-        app.include_router(create_identity_router(service))
+        app.include_router(create_identity_router(self.service))
         self.client = TestClient(app)
         self.email = f"user-{uuid.uuid4()}@example.com"
         self.password = "correct horse battery staple"
@@ -111,3 +111,24 @@ class TestIdentityApi(unittest.TestCase):
         refresh_token = register.json()["refresh_token"]
         response = self.client.post("/auth/logout", json={"refresh_token": refresh_token})
         self.assertEqual(response.status_code, 204)
+
+    def test_login_locked_out_returns_429(self):
+        self.client.post("/auth/register", json={"email": self.email, "password": self.password})
+        max_failures = (
+            self.service._rate_limiter._max_failures
+        )  # inspect the fake's configured threshold
+        for _ in range(max_failures):
+            response = self.client.post(
+                "/auth/login", json={"email": self.email, "password": "wrong"}
+            )
+            self.assertEqual(response.status_code, 401)
+        response = self.client.post(
+            "/auth/login", json={"email": self.email, "password": self.password}
+        )
+        self.assertEqual(response.status_code, 429)
+
+    def test_login_rejects_oversized_password(self):
+        response = self.client.post(
+            "/auth/login", json={"email": self.email, "password": "a" * 129}
+        )
+        self.assertEqual(response.status_code, 422)

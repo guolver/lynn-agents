@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .domain import ValidationError
 from .service import (
@@ -32,7 +32,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str
-    password: str
+    password: str = Field(max_length=128)
 
 
 class RefreshRequest(BaseModel):
