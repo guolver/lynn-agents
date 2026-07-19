@@ -33,8 +33,17 @@ class APISmokeTest(unittest.TestCase):
         )
         self.assertEqual(authenticated_without_key.status_code, 422)
         self.assertEqual(
-            authenticated_without_key.json()["detail"][0]["loc"],
-            ["header", "Idempotency-Key"],
+            authenticated_without_key.json(),
+            {
+                "detail": [
+                    {
+                        "type": "missing",
+                        "loc": ["header", "Idempotency-Key"],
+                        "msg": "Field required",
+                        "input": None,
+                    }
+                ]
+            },
         )
         headers = {"Idempotency-Key": "source-create-001", "X-Actor": "operator"}
         first = self.client.post("/api/v1/sources", json=source, headers=headers)
