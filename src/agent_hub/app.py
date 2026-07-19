@@ -139,6 +139,29 @@ def create_app(
         except Exception:
             logger.warning("Failed to initialize WorkflowTracker", exc_info=True)
 
+    # --- Identity: registration/login (PostgreSQL + AUTH_JWT_SECRET required) ---
+    identity_router = None
+    if hasattr(repo, "_engine") and settings.auth_jwt_secret:
+        try:
+            from .identity.http_api import create_identity_router
+            from .identity.rate_limiter import RedisLoginRateLimiter
+            from .identity.repository import IdentityRepository
+            from .identity.service import IdentityService
+
+            identity_repo = IdentityRepository(repo._engine)
+            identity_rate_limiter = RedisLoginRateLimiter(stream_redis_url)
+            identity_service = IdentityService(
+                identity_repo,
+                rate_limiter=identity_rate_limiter,
+                jwt_secret=settings.auth_jwt_secret,
+            )
+            identity_router = create_identity_router(identity_service)
+            logger.info("Identity service initialized (registration/login enabled)")
+        except Exception:
+            logger.warning("Failed to initialize identity service", exc_info=True)
+    elif hasattr(repo, "_engine"):
+        logger.warning("AUTH_JWT_SECRET not set — registration/login endpoints disabled")
+
     # --- Celery app (optional) ---
     celery_instance = None
     if os.getenv("CELERY_BROKER_URL"):
@@ -168,6 +191,7 @@ def create_app(
         mode=settings.mode,
         gateway_secret=settings.gateway_secret,
         development_default_roles=settings.development_default_roles,
+        auth_jwt_secret=settings.auth_jwt_secret,
     )
     application.state.agent_registry = registry
     application.state.part_time_repository = repo
@@ -180,6 +204,8 @@ def create_app(
     application.state.stream_hub = stream_hub
     application.include_router(create_platform_router(registry))
     application.include_router(http_api.router)
+    if identity_router is not None:
+        application.include_router(identity_router)
     if skill_graph_router is not None:
         application.include_router(skill_graph_router)
 
