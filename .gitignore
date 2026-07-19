@@ -49,3 +49,4 @@ npm-debug.log*
 
 # Local Git worktrees
 .worktrees/
+.superpowers/
