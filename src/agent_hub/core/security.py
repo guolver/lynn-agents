@@ -44,6 +44,7 @@ class SecuritySettings:
     mode: Literal["trusted_gateway", "development"]
     gateway_secret: str | None
     development_default_roles: frozenset[Role]
+    auth_jwt_secret: str | None = None
 
     @classmethod
     def from_env(cls) -> "SecuritySettings":
@@ -54,11 +55,32 @@ class SecuritySettings:
         if mode == "trusted_gateway" and not secret:
             raise RuntimeError("TRUSTED_GATEWAY_SECRET is required in trusted_gateway mode")
         roles = parse_roles(os.getenv("DEVELOPMENT_DEFAULT_ROLES", "admin,operator,user"))
-        return cls(mode=mode, gateway_secret=secret, development_default_roles=roles)
+        auth_jwt_secret = os.getenv("AUTH_JWT_SECRET")
+        if auth_jwt_secret and len(auth_jwt_secret) < 32:
+            raise RuntimeError("AUTH_JWT_SECRET must be at least 32 characters")
+        return cls(
+            mode=mode,
+            gateway_secret=secret,
+            development_default_roles=roles,
+            auth_jwt_secret=auth_jwt_secret,
+        )
 
 
 class IdentityMiddleware(BaseHTTPMiddleware):
-    _BYPASS_PATHS = frozenset({"/health", "/live", "/ready", "/docs", "/openapi.json", "/redoc"})
+    _BYPASS_PATHS = frozenset(
+        {
+            "/health",
+            "/live",
+            "/ready",
+            "/docs",
+            "/openapi.json",
+            "/redoc",
+            "/auth/register",
+            "/auth/login",
+            "/auth/refresh",
+            "/auth/logout",
+        }
+    )
 
     def __init__(
         self,
@@ -67,15 +89,26 @@ class IdentityMiddleware(BaseHTTPMiddleware):
         mode: Literal["trusted_gateway", "development"],
         gateway_secret: str | None = None,
         development_default_roles: frozenset[Role] = frozenset(Role),
+        auth_jwt_secret: str | None = None,
     ) -> None:
         super().__init__(app)
         self.mode = mode
         self.gateway_secret = gateway_secret
         self.development_default_roles = development_default_roles
+        self.auth_jwt_secret = auth_jwt_secret
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in self._BYPASS_PATHS:
             return await call_next(request)
+
+        if self.auth_jwt_secret:
+            authorization = request.headers.get("Authorization")
+            if authorization and authorization.startswith("Bearer "):
+                principal = self._principal_from_bearer_token(authorization.removeprefix("Bearer "))
+                if principal is None:
+                    return self._unauthorized()
+                request.state.principal = principal
+                return await call_next(request)
 
         actor = request.headers.get("X-Actor")
         tenant_id = request.headers.get("X-Tenant-Id")
@@ -108,6 +141,23 @@ class IdentityMiddleware(BaseHTTPMiddleware):
             return self._unauthorized()
         request.state.principal = Principal(actor, tenant_id, parsed_roles, True)
         return await call_next(request)
+
+    def _principal_from_bearer_token(self, token: str) -> Principal | None:
+        import jwt as pyjwt
+
+        try:
+            claims = pyjwt.decode(token, self.auth_jwt_secret, algorithms=["HS256"])
+            roles = frozenset(Role(value) for value in claims["roles"])
+            if not roles:
+                return None
+            return Principal(
+                actor_id=claims["sub"],
+                tenant_id=claims["tenant_id"],
+                roles=roles,
+                trusted=True,
+            )
+        except (pyjwt.InvalidTokenError, KeyError, ValueError):
+            return None
 
     @staticmethod
     def _unauthorized() -> JSONResponse:
