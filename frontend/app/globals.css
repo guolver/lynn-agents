@@ -1133,6 +1133,23 @@ a {
   margin-right: 4px;
 }
 
+.match-card-kit-btn {
+  margin-top: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.match-card-kit-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber-deep);
+}
+
 .match-card-clickable {
   cursor: pointer;
   transition: 150ms ease;

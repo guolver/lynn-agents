@@ -38,6 +38,7 @@ export function ChatMessage({
   fileData,
   isStreaming,
   onCardClick,
+  onGenerateKit,
 }: {
   role: 'user' | 'assistant' | 'tool';
   content: string;
@@ -45,6 +46,7 @@ export function ChatMessage({
   fileData?: FileData;
   isStreaming?: boolean;
   onCardClick?: (jobId: string) => void;
+  onGenerateKit?: (jobId: string, title: string) => void;
 }) {
   if (role === 'tool') return null;
 
@@ -114,6 +116,9 @@ export function ChatMessage({
                       m.compensation_max ? `$${m.compensation_max}/h ${m.compensation_currency ?? ''}` : undefined
                     }
                     onClick={m.job_id && onCardClick ? () => onCardClick(m.job_id!) : undefined}
+                    onGenerateKit={
+                      m.job_id && onGenerateKit ? () => onGenerateKit(m.job_id!, m.job_title ?? '') : undefined
+                    }
                   />
                 </div>
               ))}

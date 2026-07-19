@@ -6,6 +6,7 @@ export function MatchCard({
   workMode,
   compensation,
   onClick,
+  onGenerateKit,
 }: {
   title: string;
   company: string;
@@ -14,6 +15,7 @@ export function MatchCard({
   workMode?: string;
   compensation?: string;
   onClick?: () => void;
+  onGenerateKit?: () => void;
 }) {
   const pct = Math.round(score * 100);
   return (
@@ -55,6 +57,17 @@ export function MatchCard({
             </span>
           ))}
         </div>
+      )}
+      {onGenerateKit && (
+        <button
+          className="match-card-kit-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onGenerateKit();
+          }}
+        >
+          ✍️ 生成申请材料
+        </button>
       )}
     </div>
   );
