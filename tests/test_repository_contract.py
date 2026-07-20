@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from typing import Any
 
 from tests.factories import candidate_payload, job_payload, source_payload
 from tests.inmemory_repo import InMemoryRepository
+
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 
 class PayloadFactoryTest(unittest.TestCase):
@@ -104,6 +107,30 @@ class RepositoryContractMixin:
 class InMemoryRepositoryContractTest(RepositoryContractMixin, unittest.TestCase):
     def create_repository(self) -> InMemoryRepository:
         return InMemoryRepository(":memory:")
+
+
+class TenantScopedInMemoryRepositoryContractTest(RepositoryContractMixin, unittest.TestCase):
+    """A repository obtained via for_tenant() must satisfy the full contract too."""
+
+    def create_repository(self) -> Any:
+        return InMemoryRepository(":memory:").for_tenant("acme")
+
+
+@unittest.skipUnless(TEST_DATABASE_URL, "TEST_DATABASE_URL not set")
+class TenantScopedPostgresRepositoryContractTest(RepositoryContractMixin, unittest.TestCase):
+    """A PostgresRepository.for_tenant() view must satisfy the full contract too."""
+
+    def create_repository(self) -> Any:
+        from agent_hub.database.models import Base
+        from agent_hub.database.repository import PostgresRepository
+
+        from tests.factories import ensure_vector_extension
+
+        repo = PostgresRepository(TEST_DATABASE_URL)
+        ensure_vector_extension(repo._engine)
+        Base.metadata.drop_all(repo._engine)
+        Base.metadata.create_all(repo._engine)
+        return repo.for_tenant("acme")
 
 
 if __name__ == "__main__":

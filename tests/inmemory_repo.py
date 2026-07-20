@@ -3,6 +3,12 @@
 与 PostgresRepository 同受 tests/test_repository_contract.py 契约约束。
 语义对齐旧 SQLite 版：存取经 JSON 序列化往返（快照隔离外部突变）；
 list 按 created_at 倒序；list_by_session 升序；audits 插入序倒序。
+
+存储按 tenant_id 隔离（tenant -> kind -> id -> item）。``InMemoryRepository``
+本身是 root repository：``for_tenant(tenant_id)`` 返回一个按租户隔离的视图
+(``_TenantInMemoryRepository``)；未加租户前缀的直接方法（兼容旧调用点，如
+``InMemoryRepository()``、``InMemoryRepository(":memory:")``）委托到固定的
+``"default"`` 租户，保持既有行为不变。
 """
 
 from __future__ import annotations
@@ -11,6 +17,9 @@ import json
 from typing import Any, Callable
 
 from agent_hub.agents.global_part_time.domain import utcnow
+from agent_hub.core.contracts import AuthorizationError
+
+_DEFAULT_TENANT = "default"
 
 
 def _snapshot(value: Any) -> Any:
@@ -18,31 +27,141 @@ def _snapshot(value: Any) -> Any:
 
 
 class InMemoryRepository:
-    """dict 存储的 RepositoryProtocol 实现；构造参数兼容旧 Repository(":memory:") 调用点。"""
+    """dict 存储的 RootRepositoryProtocol 实现；构造参数兼容旧 Repository(":memory:") 调用点。"""
 
     def __init__(self, path: str | None = None):
-        self._entities: dict[str, dict[str, dict[str, Any]]] = {}
-        self._audits: list[dict[str, Any]] = []
-        self._idempotency: dict[tuple[str, str], dict[str, Any]] = {}
+        # tenant_id -> kind -> id -> item
+        self._entities: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+        # tenant_id -> ordered list of audit records
+        self._audits: dict[str, list[dict[str, Any]]] = {}
+        # tenant_id -> (action, key) -> result
+        self._idempotency: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
+        self._default = self.for_tenant(_DEFAULT_TENANT)
+
+    def for_tenant(self, tenant_id: str) -> "_TenantInMemoryRepository":
+        """Return a view scoped to *tenant_id*.
+
+        ``tenant_id`` must be a non-empty string. Mirrors the same guard on
+        ``PostgresRepository.for_tenant`` so both backends fail the same way
+        (raise) instead of one failing open and the other failing closed.
+        """
+        if not tenant_id:
+            raise ValueError("tenant_id must be a non-empty string")
+        return _TenantInMemoryRepository(self, tenant_id)
+
+    # ------------------------------------------------------------------
+    # Legacy direct methods: delegate to the "default" tenant scope so
+    # existing call sites (InMemoryRepository() constructed directly across
+    # the test suite) keep working unchanged.
+    # ------------------------------------------------------------------
 
     def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]:
+        return self._default.put(kind, item)
+
+    def get(self, kind: str, entity_id: str) -> dict[str, Any] | None:
+        return self._default.get(kind, entity_id)
+
+    def list(self, kind: str) -> list[dict[str, Any]]:
+        return self._default.list(kind)
+
+    def delete(self, kind: str, entity_id: str) -> None:
+        self._default.delete(kind, entity_id)
+
+    def search_jobs(
+        self,
+        q: str | None = None,
+        work_mode: str | None = None,
+        category: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        return self._default.search_jobs(
+            q=q, work_mode=work_mode, category=category, offset=offset, limit=limit
+        )
+
+    def list_job_categories(self, limit: int = 30) -> list[dict[str, Any]]:
+        return self._default.list_job_categories(limit)
+
+    def list_by_session(self, session_id: str) -> list[dict[str, Any]]:
+        return self._default.list_by_session(session_id)
+
+    def delete_by_session(self, session_id: str) -> None:
+        self._default.delete_by_session(session_id)
+
+    def audit(
+        self,
+        event: str,
+        kind: str,
+        entity_id: str,
+        actor: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self._default.audit(event, kind, entity_id, actor, details)
+
+    def audits(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._default.audits(limit)
+
+    def idempotent(
+        self, action: str, key: str, operation: Callable[[], dict[str, Any]]
+    ) -> dict[str, Any]:
+        return self._default.idempotent(action, key, operation)
+
+
+class _TenantInMemoryRepository:
+    """View over :class:`InMemoryRepository` storage scoped to a single tenant."""
+
+    def __init__(self, root: InMemoryRepository, tenant_id: str):
+        self._root = root
+        self.tenant_id = tenant_id
+
+    def _chat_session_belongs_to_tenant(self, session_id: str | None) -> bool:
+        """Mirrors ``PostgresRepository._chat_session_belongs_to_tenant``: chat
+        messages carry no tenant of their own, so ownership is checked via the
+        session they reference.
+        """
+        if not session_id:
+            return False
+        session = self._root._entities.get(self.tenant_id, {}).get("chat_session", {})
+        return session_id in session
+
+    def put(self, kind: str, item: dict[str, Any]) -> dict[str, Any]:
+        # No equivalent to PostgresRepository's cross-tenant id-collision
+        # guard is needed here, by construction rather than by choice:
+        # storage is nested tenant -> kind -> id, so `self._root._entities`
+        # only ever exposes this tenant's own bucket. A `put()` from a
+        # different tenant scope with the same id writes into that OTHER
+        # tenant's bucket, never touching or overwriting this one — there is
+        # no shared `id` keyspace across tenants to collide on, unlike
+        # Postgres where `id` is a single global primary key per kind. If
+        # this file is ever refactored to share a flat id-keyed store across
+        # tenants, this guard would need to be added back.
+        if kind == "chat_message" and not self._chat_session_belongs_to_tenant(
+            item.get("session_id")
+        ):
+            raise AuthorizationError(
+                f"chat_session {item.get('session_id')!r} does not belong to tenant "
+                f"{self.tenant_id!r}"
+            )
         now = utcnow()
         item.setdefault("created_at", now)
         item["updated_at"] = now
-        self._entities.setdefault(kind, {})[item["id"]] = _snapshot(item)
+        item["tenant_id"] = self.tenant_id
+        self._root._entities.setdefault(self.tenant_id, {}).setdefault(kind, {})[item["id"]] = (
+            _snapshot(item)
+        )
         return item
 
     def get(self, kind: str, entity_id: str) -> dict[str, Any] | None:
-        found = self._entities.get(kind, {}).get(entity_id)
+        found = self._root._entities.get(self.tenant_id, {}).get(kind, {}).get(entity_id)
         return _snapshot(found) if found is not None else None
 
     def list(self, kind: str) -> list[dict[str, Any]]:
-        items = list(self._entities.get(kind, {}).values())
+        items = list(self._root._entities.get(self.tenant_id, {}).get(kind, {}).values())
         items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
         return [_snapshot(x) for x in items]
 
     def delete(self, kind: str, entity_id: str) -> None:
-        self._entities.get(kind, {}).pop(entity_id, None)
+        self._root._entities.get(self.tenant_id, {}).get(kind, {}).pop(entity_id, None)
 
     def search_jobs(
         self,
@@ -81,17 +200,17 @@ class InMemoryRepository:
     def list_by_session(self, session_id: str) -> list[dict[str, Any]]:
         messages = [
             m
-            for m in self._entities.get("chat_message", {}).values()
+            for m in self._root._entities.get(self.tenant_id, {}).get("chat_message", {}).values()
             if m.get("session_id") == session_id
         ]
         messages.sort(key=lambda x: x.get("created_at") or "")
         return [_snapshot(m) for m in messages]
 
     def delete_by_session(self, session_id: str) -> None:
-        messages = self._entities.get("chat_message", {})
+        messages = self._root._entities.get(self.tenant_id, {}).get("chat_message", {})
         for mid in [k for k, m in messages.items() if m.get("session_id") == session_id]:
             messages.pop(mid, None)
-        self._entities.get("chat_session", {}).pop(session_id, None)
+        self._root._entities.get(self.tenant_id, {}).get("chat_session", {}).pop(session_id, None)
 
     def audit(
         self,
@@ -101,9 +220,10 @@ class InMemoryRepository:
         actor: str,
         details: dict[str, Any] | None = None,
     ) -> None:
-        self._audits.append(
+        bucket = self._root._audits.setdefault(self.tenant_id, [])
+        bucket.append(
             {
-                "id": len(self._audits) + 1,
+                "id": len(bucket) + 1,
                 "event": event,
                 "entity_kind": kind,
                 "entity_id": entity_id,
@@ -114,15 +234,17 @@ class InMemoryRepository:
         )
 
     def audits(self, limit: int = 100) -> list[dict[str, Any]]:
-        capped = self._audits[-min(limit, 1000) :]
+        bucket = self._root._audits.get(self.tenant_id, [])
+        capped = bucket[-min(limit, 1000) :]
         return [_snapshot(a) for a in reversed(capped)]
 
     def idempotent(
         self, action: str, key: str, operation: Callable[[], dict[str, Any]]
     ) -> dict[str, Any]:
-        existing = self._idempotency.get((action, key))
+        store = self._root._idempotency.setdefault(self.tenant_id, {})
+        existing = store.get((action, key))
         if existing is not None:
             return _snapshot(existing)
         result = operation()
-        self._idempotency[(action, key)] = _snapshot(result)
+        store[(action, key)] = _snapshot(result)
         return result

@@ -13,9 +13,10 @@ import uuid
 from collections.abc import Generator
 from typing import Any
 
+from ...core.security import Principal, Role
 from ...observability import get_chat_tracer
 from .chat_tools import TOOL_DEFINITIONS, execute_tool
-from .service import AgentService
+from .service import AgentService, NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -58,38 +59,87 @@ MAX_HISTORY_MESSAGES = 40
 class ChatService:
     """Manages chat sessions, persists messages, and streams LLM responses."""
 
-    def __init__(self, *, service: AgentService, repo: Any, tracer: Any = None):
+    def __init__(
+        self,
+        *,
+        service: AgentService,
+        repo: Any,
+        tracer: Any = None,
+        principal: Principal | None = None,
+    ):
         self.service = service
         self.repo = repo
         # 观测旁路：未配置 Langfuse 时为 no-op，见 observability.py
         self.tracer = tracer if tracer is not None else get_chat_tracer()
+        # Optional so worker call sites (Celery tasks, tests) that construct
+        # ChatService with no authenticated actor keep working unchanged —
+        # owner checks below are only enforced when a principal is present.
+        self.principal = principal
+
+    def _owned_session(self, session_id: str) -> dict[str, Any]:
+        """Fetch a chat session, enforcing that it belongs to the current
+        principal. Raises NotFoundError (mapped to HTTP 404) rather than a
+        403 both when the session doesn't exist and when it belongs to
+        someone else, so cross-owner probing can't distinguish the two.
+
+        Falls back to the legacy ``actor`` field for sessions created before
+        ``owner_actor_id`` existed, so old rows don't spuriously 404.
+        """
+        session = self.repo.get("chat_session", session_id)
+        if session is None or (
+            self.principal is not None
+            and Role.ADMIN not in self.principal.roles
+            and session.get("owner_actor_id", session.get("actor")) != self.principal.actor_id
+        ):
+            raise NotFoundError(f"chat_session {session_id} not found")
+        return session
+
+    def assert_session_owned(self, session_id: str) -> None:
+        """Public entry point for callers (e.g. the stream-resume HTTP route)
+        that only need to assert ownership before doing something else with
+        ``session_id`` — everything internal to ChatService goes through
+        ``_owned_session`` directly since it also needs the session payload.
+        Raises NotFoundError on a missing or not-owned session.
+        """
+        self._owned_session(session_id)
 
     def create_session(self, actor: str = "anonymous") -> dict[str, Any]:
         session_id = str(uuid.uuid4())
+        owner = self.principal.actor_id if self.principal is not None else actor
         return self.repo.put(
             "chat_session",
             {
                 "id": session_id,
                 "actor": actor,
+                "owner_actor_id": owner,
                 "status": "active",
                 "candidate_id": None,
             },
         )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
-        session = self.repo.get("chat_session", session_id)
-        if session is None:
+        try:
+            session = self._owned_session(session_id)
+        except NotFoundError:
             return None
         messages = self.repo.list_by_session(session_id)
         return {"session": session, "messages": messages}
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        return self.repo.list("chat_session")
+        sessions = self.repo.list("chat_session")
+        if self.principal is not None and Role.ADMIN not in self.principal.roles:
+            sessions = [
+                s
+                for s in sessions
+                if s.get("owner_actor_id", s.get("actor")) == self.principal.actor_id
+            ]
+        return sessions
 
     def delete_session(self, session_id: str) -> bool:
-        """Delete a session and all its messages. Returns True if found."""
-        session = self.repo.get("chat_session", session_id)
-        if session is None:
+        """Delete a session and all its messages. Returns True if found (and owned)."""
+        try:
+            self._owned_session(session_id)
+        except NotFoundError:
             return False
         self.repo.delete_by_session(session_id)
         return True
@@ -105,10 +155,12 @@ class ChatService:
             self.repo.put("chat_session", session)
 
     def bind_candidate(self, session_id: str, candidate_id: str) -> None:
-        session = self.repo.get("chat_session", session_id)
-        if session:
-            session["candidate_id"] = candidate_id
-            self.repo.put("chat_session", session)
+        try:
+            session = self._owned_session(session_id)
+        except NotFoundError:
+            return
+        session["candidate_id"] = candidate_id
+        self.repo.put("chat_session", session)
 
     def add_message(
         self,
@@ -119,6 +171,7 @@ class ChatService:
         tool_call_id: str | None = None,
         attachment: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        self._owned_session(session_id)
         msg = {
             "id": str(uuid.uuid4()),
             "session_id": session_id,
@@ -165,6 +218,7 @@ class ChatService:
         不依赖 LLM 决定是否调用工具；结果持久化为 assistant + tool 消息，
         便于刷新后从历史重建匹配卡片。返回富化后的匹配结果。
         """
+        self._owned_session(session_id)
         self._set_title_if_empty(session_id, "简历分析与岗位匹配")
 
         from .chat_tools import execute_tool
@@ -311,6 +365,7 @@ class ChatService:
         """
         import threading
 
+        self._owned_session(session_id)
         stream_id = str(uuid.uuid4())
         hub.set_active(session_id, stream_id)
 
@@ -348,8 +403,9 @@ class ChatService:
           {"event": "error", "data": {"detail": "..."}}
         """
         # Get session and candidate_id
-        session = self.repo.get("chat_session", session_id)
-        if session is None:
+        try:
+            session = self._owned_session(session_id)
+        except NotFoundError:
             yield {"event": "error", "data": {"detail": "Session not found"}}
             return
         candidate_id = session.get("candidate_id")

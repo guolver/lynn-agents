@@ -27,7 +27,7 @@ from .core.contracts import (
 )
 from .core.discovery import discover_agents
 from .core.registry import AgentRegistry
-from .core.security import IdentityMiddleware, SecuritySettings
+from .core.security import IdentityMiddleware, Principal, Role, SecuritySettings, require_roles
 from .database.config import create_repository
 
 load_dotenv()
@@ -93,11 +93,25 @@ def create_app(
                 "Failed to import embedding module, continuing without it", exc_info=True
             )
 
+    # NOTE: these two are *not* used to serve HTTP requests — every route in
+    # http_api.py builds its own request-scoped AgentService/ChatService via
+    # Depends(get_service)/Depends(get_chat_service), each carved out of the
+    # caller's Principal (tenant + actor + roles) with repo.for_tenant(...).
+    # They're kept here, unscoped and without a principal, purely for:
+    #   - other in-process call sites that predate per-request scoping and
+    #     construct AgentService/ChatService directly (worker/tasks.py), and
+    #   - tests that inspect or exercise the app-level singleton directly
+    #     (test_app_skill_graph_lifecycle.py, test_chat_stream_api.py).
     part_time_service = AgentService(repo, expand_fn=expand_fn, embed_fn=embed_fn)
 
     from .agents.global_part_time.chat_service import ChatService
+    from .observability import get_chat_tracer
 
-    chat_service = ChatService(service=part_time_service, repo=repo)
+    # Built once and reused by every per-request ChatService: a Langfuse-style
+    # tracer batches/flushes internally, so constructing a fresh one per HTTP
+    # request would be wasteful (and, for the no-op fallback, pointless).
+    chat_tracer = get_chat_tracer()
+    chat_service = ChatService(service=part_time_service, repo=repo, tracer=chat_tracer)
 
     # --- Chat stream hub (Redis Streams; enables resumable chat streaming) ---
     stream_hub = None
@@ -122,7 +136,10 @@ def create_app(
         stream_hub = None
 
     registry = AgentRegistry()
-    registry.register(GlobalPartTimeAgent(part_time_service, repo))
+    # The agent scopes its own repository/service per invocation from
+    # context.principal.tenant_id (see GlobalPartTimeAgent.invoke) — it's
+    # handed the *root* unscoped repository here, not a fixed service.
+    registry.register(GlobalPartTimeAgent(repo, expand_fn=expand_fn, embed_fn=embed_fn))
     for agent in extra_agents:
         registry.register(agent)
     if load_plugins:
@@ -170,13 +187,26 @@ def create_app(
         development_default_roles=settings.development_default_roles,
     )
     application.state.agent_registry = registry
+    # Root (unscoped) repository — request handlers derive a tenant-scoped
+    # view from it per request via repo.for_tenant(principal.tenant_id).
     application.state.part_time_repository = repo
+    # Provider factories needed to build per-request AgentService instances
+    # (see get_service()/get_chat_service() in http_api.py).
+    application.state.expand_fn = expand_fn
+    application.state.embed_fn = embed_fn
+    application.state.chat_tracer = chat_tracer
+    # Legacy/back-compat singletons — see the comment where they're built.
+    # DO NOT read these from a new route handler: they carry no Principal, so
+    # anything wired to them silently bypasses tenant scoping, RBAC, and
+    # owner checks. Routes must depend on get_service()/get_chat_service()
+    # (http_api.py) instead, which build a fresh, request-scoped instance
+    # from the caller's Principal on every call.
     application.state.part_time_service = part_time_service
+    application.state.chat_service = chat_service
     if workflow_tracker is not None:
         application.state.workflow_tracker = workflow_tracker
     if celery_instance is not None:
         application.state.celery_app = celery_instance
-    application.state.chat_service = chat_service
     application.state.stream_hub = stream_hub
     application.include_router(create_platform_router(registry))
     application.include_router(http_api.router)
@@ -194,13 +224,16 @@ def create_app(
         status: str | None = Query(None),
         workflow_type: str | None = Query(None),
         limit: int = Query(50, ge=1, le=200),
+        _principal: Principal = require_roles(Role.ADMIN),
     ) -> list[dict[str, Any]]:
         if workflow_tracker is None:
             return []
         return workflow_tracker.list_runs(status=status, workflow_type=workflow_type, limit=limit)
 
     @application.get("/api/v1/workflows/{run_id}", tags=["workflows"])
-    def get_workflow(run_id: str) -> dict[str, Any]:
+    def get_workflow(
+        run_id: str, _principal: Principal = require_roles(Role.ADMIN)
+    ) -> dict[str, Any]:
         if workflow_tracker is None:
             return JSONResponse(status_code=404, content={"detail": "workflow tracking disabled"})
         result = workflow_tracker.get_run(run_id)
@@ -211,7 +244,9 @@ def create_app(
         return result
 
     @application.post("/api/v1/workflows/{run_id}/retry", tags=["workflows"])
-    def retry_workflow(run_id: str, request: Request) -> dict[str, Any]:
+    def retry_workflow(
+        run_id: str, request: Request, _principal: Principal = require_roles(Role.ADMIN)
+    ) -> dict[str, Any]:
         if workflow_tracker is None:
             return JSONResponse(status_code=503, content={"detail": "workflow tracking disabled"})
         run = workflow_tracker.get_run(run_id)

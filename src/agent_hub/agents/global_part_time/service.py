@@ -10,6 +10,7 @@ import logging
 import uuid
 from typing import Any, Callable
 
+from ...core.security import Principal, Role
 from .repository import RepositoryProtocol
 from .domain import (
     RULE_VERSION,
@@ -44,10 +45,20 @@ class AgentService:
         repository: RepositoryProtocol,
         expand_fn: Callable[[list[str]], set[str]] | None = None,
         embed_fn: Callable[[str], list[float] | None] | None = None,
+        *,
+        principal: Principal | None = None,
+        request_id: str | None = None,
     ):
         self.repo = repository
         self.expand_fn = expand_fn
         self.embed_fn = embed_fn
+        # Principal/request_id are optional so worker call sites (which invoke
+        # AgentService outside any HTTP request, with no authenticated actor
+        # concept) keep working unchanged — see worker/tasks.py. When present,
+        # they drive owner checks on personal candidate data and audit
+        # enrichment; when absent, behavior is identical to before this task.
+        self.principal = principal
+        self.request_id = request_id
 
     @staticmethod
     def _id() -> str:
@@ -59,16 +70,86 @@ class AgentService:
             raise NotFoundError(f"{kind} {entity_id} not found")
         return item
 
+    def _audit(
+        self,
+        event: str,
+        kind: str,
+        entity_id: str,
+        actor: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Delegate to the repository's ``audit()``, enriching *details* with a
+        ``security_context`` block (tenant, actor, roles, request id) derived
+        from the current Principal/request context. Kept as a plain ``details``
+        enrichment (rather than new keyword args on the repository protocol)
+        so no repository implementation needs to change for this task.
+        """
+        security_context: dict[str, Any] = {"actor": actor}
+        if self.principal is not None:
+            security_context["tenant_id"] = self.principal.tenant_id
+            security_context["roles"] = sorted(role.value for role in self.principal.roles)
+        else:
+            tenant_id = getattr(self.repo, "tenant_id", None)
+            if tenant_id is not None:
+                security_context["tenant_id"] = tenant_id
+        if self.request_id is not None:
+            security_context["request_id"] = self.request_id
+        enriched = {**(details or {}), "security_context": security_context}
+        self.repo.audit(event, kind, entity_id, actor, enriched)
+
+    # Roles that may act on a candidate they don't own: ADMIN as a general
+    # operational escape hatch, OPERATOR because ops-triggered bulk actions
+    # (POST /matches/run, POST /notifications/preview, the "sync"/"send"
+    # notification pipeline) are expected to run across every candidate in
+    # the tenant, not just the caller's own. Every *personal* candidate route
+    # in http_api.py (get/update/consent/delete/matches) is already gated to
+    # USER/ADMIN at the route level, so OPERATOR never reaches those through
+    # HTTP anyway — this bypass only matters for the ops-facing call sites
+    # (run_matches, preview_digest) that OPERATOR legitimately needs.
+    _OWNER_CHECK_BYPASS_ROLES = frozenset({Role.ADMIN, Role.OPERATOR})
+
+    def _check_candidate_owner(self, candidate: dict[str, Any]) -> None:
+        """Raise NotFoundError if *candidate* isn't owned by the current principal.
+
+        No-op when there is no principal (worker call sites) or the principal
+        holds an owner-check-bypass role. Cross-owner access reports as "not
+        found" rather than "forbidden" to avoid confirming a candidate id
+        exists to a caller who doesn't own it.
+
+        A candidate with no ``owner_actor_id`` recorded (created through a
+        principal-less path — e.g. the Celery-backed resume upload in
+        worker/tasks.py, which constructs AgentService with no Principal) is
+        NOT treated as unowned-by-everyone: unlike a mismatched owner, a
+        *missing* owner allows any authenticated principal through. An
+        unmatchable sentinel here would lock the very user who uploaded the
+        resume out of their own profile (view/edit/consent/delete), leaving
+        only ADMIN able to touch it — worse than not checking ownership at
+        all. This mirrors ChatService._owned_session falling back to a real
+        field (``actor``) rather than a sentinel; candidates have no
+        equivalent legacy field, so "no owner recorded" means "not yet
+        claimed" rather than "claimed by nobody in particular".
+        """
+        if self.principal is None or self.principal.roles & self._OWNER_CHECK_BYPASS_ROLES:
+            return
+        owner = candidate.get("owner_actor_id")
+        if owner is not None and owner != self.principal.actor_id:
+            raise NotFoundError(f"candidate {candidate.get('id')} not found")
+
+    def _owned_candidate(self, candidate_id: str) -> dict[str, Any]:
+        candidate = self._required("candidate", candidate_id)
+        self._check_candidate_owner(candidate)
+        return candidate
+
     def get_job(self, job_id: str) -> dict[str, Any]:
         return self._required("job", job_id)
 
     def get_candidate(self, candidate_id: str) -> dict[str, Any]:
-        return self._required("candidate", candidate_id)
+        return self._owned_candidate(candidate_id)
 
     def create_source(self, payload: dict[str, Any], actor: str) -> dict[str, Any]:
         source = {**payload, "id": self._id(), "review_status": "pending", "enabled": False}
         source = self.repo.put("source", source)
-        self.repo.audit("source.created", "source", source["id"], actor)
+        self._audit("source.created", "source", source["id"], actor)
         return source
 
     def review_source(
@@ -83,7 +164,7 @@ class AgentService:
             review_note=note,
         )
         self.repo.put("source", source)
-        self.repo.audit("source.reviewed", "source", source_id, actor, {"approved": approved})
+        self._audit("source.reviewed", "source", source_id, actor, {"approved": approved})
         return source
 
     def sync_source(self, source_id: str, jobs: list[dict[str, Any]], actor: str) -> dict[str, Any]:
@@ -103,9 +184,7 @@ class AgentService:
             risk = assess_risk(job)
             if risk.action == "reject":
                 rejected += 1
-                self.repo.audit(
-                    "job.rejected", "source", source_id, actor, {"signals": risk.signals}
-                )
+                self._audit("job.rejected", "source", source_id, actor, {"signals": risk.signals})
                 continue
             prior = by_key.get(key)
             now = utcnow()
@@ -142,8 +221,8 @@ class AgentService:
             ids.append(job["id"])
             imported += 1
             review += int(risk.action == "review")
-            self.repo.audit("job.imported", "job", job["id"], actor, {"risk": risk.level})
-        self.repo.audit("source.synced", "source", source_id, actor, {"received": len(jobs)})
+            self._audit("job.imported", "job", job["id"], actor, {"risk": risk.level})
+        self._audit("source.synced", "source", source_id, actor, {"received": len(jobs)})
         return {
             "source_id": source_id,
             "received": len(jobs),
@@ -164,7 +243,7 @@ class AgentService:
             review_note=note,
         )
         self.repo.put("job", job)
-        self.repo.audit("job.reviewed", "job", job_id, actor, {"approved": approved})
+        self._audit("job.reviewed", "job", job_id, actor, {"approved": approved})
         return job
 
     def report_job(self, job_id: str, reason: str, actor: str) -> dict[str, Any]:
@@ -175,47 +254,66 @@ class AgentService:
             job["status"] = "pending_review"
             job["review_status"] = "pending"
         self.repo.put("job", job)
-        self.repo.audit("job.reported", "job", job_id, actor, {"reason": reason})
+        self._audit("job.reported", "job", job_id, actor, {"reason": reason})
         return job
 
     def create_candidate(self, payload: dict[str, Any], actor: str) -> dict[str, Any]:
         candidate = {**payload, "id": self._id(), "consent_status": "not_requested"}
+        candidate["owner_actor_id"] = (
+            self.principal.actor_id if self.principal is not None else actor
+        )
         candidate = self.repo.put("candidate", candidate)
-        self.repo.audit("candidate.created", "candidate", candidate["id"], actor)
+        self._audit("candidate.created", "candidate", candidate["id"], actor)
         return candidate
 
     def update_candidate(
         self, candidate_id: str, changes: dict[str, Any], actor: str
     ) -> dict[str, Any]:
-        candidate = self._required("candidate", candidate_id)
-        protected = {"id", "consent_status", "created_at", "updated_at"}
+        candidate = self._owned_candidate(candidate_id)
+        protected = {"id", "consent_status", "created_at", "updated_at", "owner_actor_id"}
         candidate.update({k: v for k, v in changes.items() if k not in protected})
         self.repo.put("candidate", candidate)
-        self.repo.audit("candidate.preferences_updated", "candidate", candidate_id, actor)
+        self._audit("candidate.preferences_updated", "candidate", candidate_id, actor)
         return candidate
 
     def set_consent(
-        self, candidate_id: str, opted_in: bool, actor: str, version: str
+        self,
+        candidate_id: str,
+        opted_in: bool,
+        actor: str,
+        version: str,
+        *,
+        enforce_owner: bool = True,
     ) -> dict[str, Any]:
-        candidate = self._required("candidate", candidate_id)
+        """``enforce_owner=False`` is used by the public self-service unsubscribe
+        flow (``POST /unsubscribe``), where the caller intentionally isn't the
+        candidate's owner (e.g. an email unsubscribe link clicked anonymously).
+        Every other caller (the personal ``POST /candidates/{id}/consent``
+        route, chat's own onboarding flow) keeps the default owner check.
+        """
+        candidate = (
+            self._owned_candidate(candidate_id)
+            if enforce_owner
+            else self._required("candidate", candidate_id)
+        )
         candidate.update(
             consent_status="opted_in" if opted_in else "opted_out",
             consent_record={"version": version, "recorded_at": utcnow(), "actor": actor},
         )
         self.repo.put("candidate", candidate)
-        self.repo.audit(
+        self._audit(
             "candidate.consent_changed", "candidate", candidate_id, actor, {"opted_in": opted_in}
         )
         return candidate
 
     def delete_candidate(self, candidate_id: str, actor: str) -> dict[str, Any]:
-        self._required("candidate", candidate_id)
+        self._owned_candidate(candidate_id)
         self.repo.delete("candidate", candidate_id)
         for kind in ("match", "notification", "feedback"):
             for item in self.repo.list(kind):
                 if item.get("candidate_id") == candidate_id:
                     self.repo.delete(kind, item["id"])
-        self.repo.audit(
+        self._audit(
             "candidate.deleted", "candidate", candidate_id, actor, {"personal_data_removed": True}
         )
         return {"deleted": True, "candidate_id": candidate_id}
@@ -232,8 +330,16 @@ class AgentService:
         exclude_job_ids（如会话内已推荐过的岗位）不会被剔除，而是排到未展示
         岗位之后：优先出新岗位，新岗位不足 limit 时按分数回填，保证"换一批"
         既有差异性又不返回空列表。
+
+        Owner-checked like every other personal-candidate method (get/update/
+        consent/delete/matches/feedback) — reachable via the chat tool-calling
+        path and the platform ``find_matches`` action with a caller-supplied
+        candidate_id, neither of which independently verifies ownership.
+        OPERATOR/ADMIN bypass, matching the ops-triggered bulk callers
+        (POST /matches/run) that legitimately run matching across every
+        candidate in the tenant.
         """
-        candidate = self._required("candidate", candidate_id)
+        candidate = self._owned_candidate(candidate_id)
         expansion_failed = False
 
         def expand_skills(names: list[str]) -> set[str]:
@@ -365,7 +471,7 @@ class AgentService:
         exclude = set(exclude_job_ids or ())
         results.sort(key=lambda x: (x["job_id"] in exclude, -x["score"]))
         results = results[:limit]
-        self.repo.audit(
+        self._audit(
             "matches.run",
             "candidate",
             candidate_id,
@@ -381,7 +487,7 @@ class AgentService:
         return {"matches": results, "filtered": filtered}
 
     def candidate_matches(self, candidate_id: str) -> list[dict[str, Any]]:
-        self._required("candidate", candidate_id)
+        self._owned_candidate(candidate_id)
         items = [x for x in self.repo.list("match") if x["candidate_id"] == candidate_id]
         items.sort(key=lambda x: x["score"], reverse=True)
 
@@ -396,6 +502,10 @@ class AgentService:
 
     def feedback(self, match_id: str, value: str, actor: str) -> dict[str, Any]:
         match = self._required("match", match_id)
+        # A match always belongs to a candidate; reacting to someone else's
+        # match should 404 the same way reading their candidate profile does.
+        candidate = self._required("candidate", match["candidate_id"])
+        self._check_candidate_owner(candidate)
         item = self.repo.put(
             "feedback",
             {
@@ -405,7 +515,7 @@ class AgentService:
                 "value": value,
             },
         )
-        self.repo.audit("match.feedback", "match", match_id, actor, {"value": value})
+        self._audit("match.feedback", "match", match_id, actor, {"value": value})
         return item
 
     def request_approval(
@@ -430,7 +540,7 @@ class AgentService:
                 "requested_by": actor,
             },
         )
-        self.repo.audit(
+        self._audit(
             "approval.requested",
             "approval",
             approval["id"],
@@ -442,7 +552,10 @@ class AgentService:
     def preview_digest(
         self, candidate_id: str, match_ids: list[str], actor: str, base_url: str
     ) -> dict[str, Any]:
-        candidate = self._required("candidate", candidate_id)
+        # Owner-checked for the same reason as run_matches (see its
+        # docstring) — OPERATOR/ADMIN bypass for the ops notification
+        # pipeline (POST /notifications/preview).
+        candidate = self._owned_candidate(candidate_id)
         if candidate.get("consent_status") != "opted_in":
             raise PolicyError("candidate is not opted in")
         if candidate.get("notification_frequency") == "paused":
@@ -482,7 +595,7 @@ class AgentService:
             "rule_version": RULE_VERSION,
         }
         self.repo.put("notification", draft)
-        self.repo.audit("notification.previewed", "notification", notification_id, actor)
+        self._audit("notification.previewed", "notification", notification_id, actor)
         return draft
 
     def review_notification(
@@ -495,7 +608,7 @@ class AgentService:
             status="approved" if approved else "rejected", reviewed_by=actor, reviewed_at=utcnow()
         )
         self.repo.put("notification", item)
-        self.repo.audit(
+        self._audit(
             "notification.reviewed", "notification", notification_id, actor, {"approved": approved}
         )
         return item
@@ -533,7 +646,7 @@ class AgentService:
             provider_message_id=f"sim-{self._id()}",
         )
         self.repo.put("notification", item)
-        self.repo.audit(
+        self._audit(
             "notification.sent", "notification", notification_id, actor, {"provider": "simulation"}
         )
         return item
