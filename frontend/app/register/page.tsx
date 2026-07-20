@@ -24,10 +24,12 @@ export default function RegisterPage() {
       if (!response.ok) {
         const body = await response.json().catch(() => ({ detail: '注册失败' }));
         setError(body.detail ?? '注册失败');
+        setSubmitting(false);
         return;
       }
       router.push('/');
-    } finally {
+    } catch {
+      setError('网络错误，请稍后重试');
       setSubmitting(false);
     }
   }
