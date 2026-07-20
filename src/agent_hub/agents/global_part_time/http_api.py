@@ -167,6 +167,10 @@ class UnsubscribeRequest(APIModel):
 
 
 IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)]
+# `create_chat_session` and `upload_chat_resume` derive the actor from
+# `Depends(get_principal)` instead of this header — deliberately, not an
+# oversight. Every other endpoint below still uses the raw X-Actor header;
+# migrating them to Principal-based identity is a separate, larger effort.
 Actor = Annotated[str, Header(alias="X-Actor", min_length=1, max_length=200)]
 
 router = APIRouter(prefix="/api/v1", tags=["global-part-time-legacy"])
