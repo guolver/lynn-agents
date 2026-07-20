@@ -259,8 +259,9 @@ class AgentService:
 
     def create_candidate(self, payload: dict[str, Any], actor: str) -> dict[str, Any]:
         candidate = {**payload, "id": self._id(), "consent_status": "not_requested"}
-        if self.principal is not None:
-            candidate["owner_actor_id"] = self.principal.actor_id
+        candidate["owner_actor_id"] = (
+            self.principal.actor_id if self.principal is not None else actor
+        )
         candidate = self.repo.put("candidate", candidate)
         self._audit("candidate.created", "candidate", candidate["id"], actor)
         return candidate
