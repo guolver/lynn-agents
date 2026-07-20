@@ -19,7 +19,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from agent_hub.database.models import RefreshToken, User
+from agent_hub.database.models import AuditLog, RefreshToken, User
 
 
 def _utcnow() -> datetime:
@@ -173,6 +173,33 @@ class IdentityRepository:
             if token is not None:
                 token.revoked_at = _utcnow()
                 session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def audit(
+        self, *, event: str, tenant_id: str, actor: str, details: dict[str, Any] | None = None
+    ) -> None:
+        session = self._session()
+        try:
+            row = AuditLog(
+                id=_new_id(),
+                tenant_id=tenant_id,
+                event=event,
+                kind="identity",
+                # entity_id is String(36), sized for UUID actors (user id). ``actor``
+                # is a UUID for every event except a failed login against an unknown
+                # or mismatched email, where it's the attempted email address and can
+                # exceed 36 chars — truncate defensively so that case never breaks the
+                # insert. ``actor`` (String(255)) always keeps the untruncated value.
+                entity_id=actor[:36],
+                actor=actor,
+                details=details,
+            )
+            session.add(row)
+            session.commit()
         except Exception:
             session.rollback()
             raise

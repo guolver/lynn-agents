@@ -11,9 +11,9 @@ import os
 import unittest
 import uuid
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 
-from agent_hub.database.models import Base
+from agent_hub.database.models import AuditLog, Base
 from agent_hub.identity.crypto import decode_access_token
 from agent_hub.identity.repository import IdentityRepository
 from agent_hub.identity.service import (
@@ -67,6 +67,21 @@ class TestIdentityService(unittest.TestCase):
         )
         self.email = f"user-{uuid.uuid4()}@example.com"
         self.password = "correct horse battery staple"
+
+    def _audit_rows(self, event: str, *, actor: str | None = None) -> list[AuditLog]:
+        session = self.repo._session()
+        try:
+            filters = {"event": event}
+            if actor is not None:
+                filters["actor"] = actor
+            return list(session.execute(select(AuditLog).filter_by(**filters)).scalars().all())
+        finally:
+            session.close()
+
+    def _assert_password_never_logged(self, rows: list[AuditLog]) -> None:
+        for row in rows:
+            self.assertNotIn(self.password, repr(row.details))
+            self.assertNotEqual(row.actor, self.password)
 
     def test_register_returns_tokens_and_creates_default_role_user(self):
         tokens = self.service.register(self.email, self.password)
@@ -177,3 +192,74 @@ class TestIdentityService(unittest.TestCase):
         self.service.register(self.email, self.password)
         tokens = self.service.login(self.email.upper(), self.password)
         self.assertIn("access_token", tokens)
+
+    def test_register_writes_audit_log(self):
+        tokens = self.service.register(self.email, self.password)
+        user_id = decode_access_token(tokens["access_token"], JWT_SECRET)["sub"]
+
+        rows = self._audit_rows("user.registered", actor=user_id)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row.tenant_id, "default")
+        self.assertEqual(row.kind, "identity")
+        self.assertEqual(row.details["email"], self.email)
+        self._assert_password_never_logged(rows)
+
+    def test_login_success_writes_audit_log(self):
+        self.service.register(self.email, self.password)
+        tokens = self.service.login(self.email, self.password)
+        user_id = decode_access_token(tokens["access_token"], JWT_SECRET)["sub"]
+
+        rows = self._audit_rows("user.login_succeeded", actor=user_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].tenant_id, "default")
+        self._assert_password_never_logged(rows)
+
+    def test_login_failure_writes_audit_log_with_attempted_email_as_actor(self):
+        self.service.register(self.email, self.password)
+        with self.assertRaises(InvalidCredentialsError):
+            self.service.login(self.email, "wrong password")
+
+        rows = self._audit_rows("user.login_failed", actor=self.email)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].tenant_id, "default")
+        self._assert_password_never_logged(rows)
+
+    def test_login_failure_for_unknown_email_writes_audit_log(self):
+        unknown_email = f"nobody-{uuid.uuid4()}@example.com"
+        with self.assertRaises(InvalidCredentialsError):
+            self.service.login(unknown_email, "irrelevant")
+
+        rows = self._audit_rows("user.login_failed", actor=unknown_email)
+        self.assertEqual(len(rows), 1)
+        self._assert_password_never_logged(rows)
+
+    def test_refresh_writes_audit_log(self):
+        tokens = self.service.register(self.email, self.password)
+        user_id = decode_access_token(tokens["access_token"], JWT_SECRET)["sub"]
+        self.service.refresh(tokens["refresh_token"])
+
+        rows = self._audit_rows("user.token_refreshed", actor=user_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].tenant_id, "default")
+        self._assert_password_never_logged(rows)
+
+    def test_logout_writes_audit_log(self):
+        tokens = self.service.register(self.email, self.password)
+        user_id = decode_access_token(tokens["access_token"], JWT_SECRET)["sub"]
+        self.service.logout(tokens["refresh_token"])
+
+        rows = self._audit_rows("user.logged_out", actor=user_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].tenant_id, "default")
+        self._assert_password_never_logged(rows)
+
+    def test_logout_does_not_write_audit_log_for_already_revoked_token(self):
+        tokens = self.service.register(self.email, self.password)
+        user_id = decode_access_token(tokens["access_token"], JWT_SECRET)["sub"]
+        self.service.logout(tokens["refresh_token"])
+        before = len(self._audit_rows("user.logged_out", actor=user_id))
+
+        self.service.logout(tokens["refresh_token"])  # already revoked — no-op
+        after = len(self._audit_rows("user.logged_out", actor=user_id))
+        self.assertEqual(before, after)

@@ -80,7 +80,14 @@ class IdentityService:
             )
         except DuplicateEmailError:
             raise EmailAlreadyRegisteredError(email) from None
-        return self._issue_tokens(user)
+        tokens = self._issue_tokens(user)
+        self._repo.audit(
+            event="user.registered",
+            tenant_id=user["tenant_id"],
+            actor=user["id"],
+            details={"email": user["email"]},
+        )
+        return tokens
 
     def login(self, email: str, password: str) -> dict[str, Any]:
         email = normalize_email(email)
@@ -93,9 +100,21 @@ class IdentityService:
         password_ok = verify_password(password, password_hash)
         if user is None or not password_ok:
             self._rate_limiter.record_failure(rate_key)
+            self._repo.audit(
+                event="user.login_failed",
+                tenant_id=self._tenant_id,
+                actor=email,
+                details=None,
+            )
             raise InvalidCredentialsError()
 
         self._rate_limiter.reset(rate_key)
+        self._repo.audit(
+            event="user.login_succeeded",
+            tenant_id=user["tenant_id"],
+            actor=user["id"],
+            details=None,
+        )
         return self._issue_tokens(user)
 
     def refresh(self, refresh_token: str) -> dict[str, Any]:
@@ -106,12 +125,25 @@ class IdentityService:
         user = self._repo.get_user_by_id(record["user_id"])
         if user is None:
             raise InvalidRefreshTokenError()
-        return self._issue_tokens(user)
+        tokens = self._issue_tokens(user)
+        self._repo.audit(
+            event="user.token_refreshed",
+            tenant_id=user["tenant_id"],
+            actor=user["id"],
+            details=None,
+        )
+        return tokens
 
     def logout(self, refresh_token: str) -> None:
         record = self._repo.get_refresh_token(hash_refresh_token(refresh_token))
         if record is not None and record["revoked_at"] is None:
             self._repo.revoke_refresh_token(record["id"])
+            self._repo.audit(
+                event="user.logged_out",
+                tenant_id=record["tenant_id"],
+                actor=record["user_id"],
+                details=None,
+            )
 
     def _issue_tokens(self, user: dict[str, Any]) -> dict[str, Any]:
         roles = user["roles"].split(",")
