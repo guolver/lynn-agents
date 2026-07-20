@@ -46,8 +46,12 @@ DATABASE_PATH=./data/agent.db
 PUBLIC_BASE_URL=http://localhost:8000
 ```
 
-注册/登录功能（`/auth/*`）需要 `AUTH_JWT_SECRET`（至少 32 位）用于签发和校验登录 token。本地开发可以直接用 `.env.example` 里的占位值，或用
-`python -c "import secrets; print(secrets.token_urlsafe(32))"` 生成一个随机值。缺失这个变量时应用仍能正常启动，只是 `/auth/*` 路由不会注册（日志会打印一行警告）。
+注册/登录功能（`/auth/*`）可通过 `AUTH_JWT_SECRET`（至少 32 位）启用，用于签发和校验登录 token。这是**可选配置**：缺失此变量时应用仍能正常启动，只是 `/auth/*` 路由不会注册（日志会打印一行警告）。
+
+在本地用 `docker compose up` 启动时，为了安全起见，`docker-compose.yml` 故意不设置此变量的默认值。如果要测试注册登录，需要在项目根目录创建 `.env` 文件（已被 gitignore）并设置 `AUTH_JWT_SECRET`，可用以下命令生成：
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
 
 ### 4. 启动服务
 
