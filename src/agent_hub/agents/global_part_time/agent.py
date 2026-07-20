@@ -12,8 +12,17 @@ from ...core.contracts import (
     ExecutionContext,
     InvalidInvocationError,
 )
+from ...core.security import Role
 from .repository import RootRepositoryProtocol
 from .service import AgentService
+
+# Mirrors the role matrix built into http_api.py's /api/v1 routes: source and
+# notification-pipeline ops are OPERATOR/ADMIN only. ActionDefinition defaults
+# to allowing every role (see core/contracts.py) — without an explicit
+# override here, registry.invoke()'s role check is a silent no-op and a USER
+# principal can reach the identical underlying service call that http_api.py
+# just gated behind OPERATOR/ADMIN (e.g. sync_source == POST /sources/sync).
+_OPS_ROLES = frozenset({Role.OPERATOR, Role.ADMIN})
 
 
 class GlobalPartTimeAgent:
@@ -28,7 +37,12 @@ class GlobalPartTimeAgent:
     )
 
     _actions = (
-        ActionDefinition("list_sources", "列出已登记来源", input_schema={"type": "object"}),
+        ActionDefinition(
+            "list_sources",
+            "列出已登记来源",
+            input_schema={"type": "object"},
+            allowed_roles=_OPS_ROLES,
+        ),
         ActionDefinition(
             "sync_source",
             "同步一个已批准的结构化职位 Feed",
@@ -36,11 +50,14 @@ class GlobalPartTimeAgent:
             risk_level="medium",
             requires_idempotency_key=True,
             input_schema={"required": ["source_id", "jobs"]},
+            allowed_roles=_OPS_ROLES,
         ),
         ActionDefinition(
             "validate_job",
             "读取确定性风险与质量校验结果",
             input_schema={"required": ["job_id"]},
+            # Left unrestricted (default: ADMIN/OPERATOR/USER), mirroring the
+            # unrestricted GET /jobs/{id} REST route — read-only job lookup.
         ),
         ActionDefinition(
             "find_matches",
@@ -48,6 +65,11 @@ class GlobalPartTimeAgent:
             mode="write",
             requires_idempotency_key=True,
             input_schema={"required": ["candidate_id"]},
+            # Left unrestricted (default): a USER may run matches for their
+            # OWN candidate (mirrors chat's internal use of run_matches), but
+            # AgentService.run_matches() now owner-checks candidate_id itself
+            # (OPERATOR/ADMIN bypass) — see service.py — so a USER can no
+            # longer reach another actor's candidate through this action.
         ),
         ActionDefinition(
             "draft_digest",
@@ -56,6 +78,7 @@ class GlobalPartTimeAgent:
             risk_level="medium",
             requires_idempotency_key=True,
             input_schema={"required": ["candidate_id", "match_ids"]},
+            allowed_roles=_OPS_ROLES,
         ),
         ActionDefinition(
             "request_approval",
@@ -64,6 +87,7 @@ class GlobalPartTimeAgent:
             risk_level="high",
             requires_idempotency_key=True,
             input_schema={"required": ["action", "target_id"]},
+            allowed_roles=_OPS_ROLES,
         ),
         ActionDefinition(
             "send_digest",
@@ -72,6 +96,7 @@ class GlobalPartTimeAgent:
             risk_level="high",
             requires_idempotency_key=True,
             input_schema={"required": ["notification_id"]},
+            allowed_roles=_OPS_ROLES,
         ),
     )
 

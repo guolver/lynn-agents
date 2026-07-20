@@ -196,6 +196,11 @@ def create_app(
     application.state.embed_fn = embed_fn
     application.state.chat_tracer = chat_tracer
     # Legacy/back-compat singletons — see the comment where they're built.
+    # DO NOT read these from a new route handler: they carry no Principal, so
+    # anything wired to them silently bypasses tenant scoping, RBAC, and
+    # owner checks. Routes must depend on get_service()/get_chat_service()
+    # (http_api.py) instead, which build a fresh, request-scoped instance
+    # from the caller's Principal on every call.
     application.state.part_time_service = part_time_service
     application.state.chat_service = chat_service
     if workflow_tracker is not None:

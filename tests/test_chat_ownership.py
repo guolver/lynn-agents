@@ -15,7 +15,7 @@ import unittest
 from fastapi.testclient import TestClient
 
 from agent_hub.app import create_app
-from tests.factories import candidate_payload
+from tests.factories import candidate_payload, job_payload, source_payload
 from tests.inmemory_repo import InMemoryRepository as Repository
 
 
@@ -216,6 +216,114 @@ class CandidateOwnershipTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["consent_status"], "opted_out")
+
+
+class MatchFeedbackOwnershipTest(unittest.TestCase):
+    """POST /matches/{match_id}/feedback had zero test coverage before this
+    task even though it now carries an owner check (AgentService.feedback
+    verifies the match's candidate belongs to the caller). Covers both the
+    role gate (USER/ADMIN only) and the owner check (can't react to a match
+    computed for someone else's candidate).
+    """
+
+    def setUp(self):
+        self.repository = Repository(":memory:")
+        self.client = TestClient(create_app(self.repository))
+
+    def _create_match_for(self, actor: str) -> str:
+        source = self.client.post(
+            "/api/v1/sources",
+            json=source_payload(),
+            headers={
+                **headers_for("op-1", "operator"),
+                "Idempotency-Key": f"source-create-{actor}",
+            },
+        ).json()
+        self.client.post(
+            f"/api/v1/sources/{source['id']}/review",
+            json={"approved": True, "note": "ok"},
+            headers={
+                **headers_for("op-1", "operator"),
+                "Idempotency-Key": f"source-review-{actor}",
+            },
+        )
+        self.client.post(
+            f"/api/v1/sources/{source['id']}/sync",
+            json={"jobs": [job_payload()]},
+            headers={
+                **headers_for("op-1", "operator"),
+                "Idempotency-Key": f"source-sync-{actor}",
+            },
+        )
+        candidate = self.client.post(
+            "/api/v1/candidates",
+            json=candidate_payload(),
+            headers={
+                **headers_for(actor),
+                "Idempotency-Key": f"candidate-create-{actor}",
+            },
+        ).json()
+        # hard_filter rejects any job for a candidate that hasn't opted in.
+        self.client.post(
+            f"/api/v1/candidates/{candidate['id']}/consent",
+            json={"opted_in": True},
+            headers={
+                **headers_for(actor),
+                "Idempotency-Key": f"candidate-consent-{actor}",
+            },
+        )
+        # Matching is triggered by an operator (POST /matches/run is
+        # OPERATOR/ADMIN-only ops tooling) but must still land against the
+        # actor's own candidate — OPERATOR bypasses the owner check that
+        # would otherwise block it from acting on someone else's candidate.
+        matches = self.client.post(
+            "/api/v1/matches/run",
+            json={"candidate_id": candidate["id"], "limit": 10},
+            headers={
+                **headers_for("op-1", "operator"),
+                "Idempotency-Key": f"matches-run-{actor}",
+            },
+            params={"sync": "true"},
+        ).json()
+        self.assertTrue(matches["matches"], "fixture setup must produce at least one match")
+        return matches["matches"][0]["id"]
+
+    def test_owner_can_give_feedback_on_own_match(self):
+        match_id = self._create_match_for("alice")
+        response = self.client.post(
+            f"/api/v1/matches/{match_id}/feedback",
+            json={"value": "saved"},
+            headers={**headers_for("alice"), "Idempotency-Key": "feedback-001"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_user_cannot_give_feedback_on_another_users_match(self):
+        match_id = self._create_match_for("alice")
+        response = self.client.post(
+            f"/api/v1/matches/{match_id}/feedback",
+            json={"value": "saved"},
+            headers={**headers_for("bob"), "Idempotency-Key": "feedback-002"},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_operator_cannot_give_feedback(self):
+        """match_feedback is USER/ADMIN — OPERATOR has no self to react as."""
+        match_id = self._create_match_for("alice")
+        response = self.client.post(
+            f"/api/v1/matches/{match_id}/feedback",
+            json={"value": "saved"},
+            headers={**headers_for("op-1", "operator"), "Idempotency-Key": "feedback-003"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_give_feedback_on_any_match(self):
+        match_id = self._create_match_for("alice")
+        response = self.client.post(
+            f"/api/v1/matches/{match_id}/feedback",
+            json={"value": "saved"},
+            headers={**headers_for("admin-1", "admin"), "Idempotency-Key": "feedback-004"},
+        )
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":

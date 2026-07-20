@@ -97,18 +97,42 @@ class AgentService:
         enriched = {**(details or {}), "security_context": security_context}
         self.repo.audit(event, kind, entity_id, actor, enriched)
 
+    # Roles that may act on a candidate they don't own: ADMIN as a general
+    # operational escape hatch, OPERATOR because ops-triggered bulk actions
+    # (POST /matches/run, POST /notifications/preview, the "sync"/"send"
+    # notification pipeline) are expected to run across every candidate in
+    # the tenant, not just the caller's own. Every *personal* candidate route
+    # in http_api.py (get/update/consent/delete/matches) is already gated to
+    # USER/ADMIN at the route level, so OPERATOR never reaches those through
+    # HTTP anyway — this bypass only matters for the ops-facing call sites
+    # (run_matches, preview_digest) that OPERATOR legitimately needs.
+    _OWNER_CHECK_BYPASS_ROLES = frozenset({Role.ADMIN, Role.OPERATOR})
+
     def _check_candidate_owner(self, candidate: dict[str, Any]) -> None:
         """Raise NotFoundError if *candidate* isn't owned by the current principal.
 
         No-op when there is no principal (worker call sites) or the principal
-        holds the ADMIN role. Cross-owner access reports as "not found" rather
-        than "forbidden" to avoid confirming a candidate id exists to a caller
-        who doesn't own it.
+        holds an owner-check-bypass role. Cross-owner access reports as "not
+        found" rather than "forbidden" to avoid confirming a candidate id
+        exists to a caller who doesn't own it.
+
+        A candidate with no ``owner_actor_id`` recorded (created through a
+        principal-less path — e.g. the Celery-backed resume upload in
+        worker/tasks.py, which constructs AgentService with no Principal) is
+        NOT treated as unowned-by-everyone: unlike a mismatched owner, a
+        *missing* owner allows any authenticated principal through. An
+        unmatchable sentinel here would lock the very user who uploaded the
+        resume out of their own profile (view/edit/consent/delete), leaving
+        only ADMIN able to touch it — worse than not checking ownership at
+        all. This mirrors ChatService._owned_session falling back to a real
+        field (``actor``) rather than a sentinel; candidates have no
+        equivalent legacy field, so "no owner recorded" means "not yet
+        claimed" rather than "claimed by nobody in particular".
         """
-        if self.principal is None or Role.ADMIN in self.principal.roles:
+        if self.principal is None or self.principal.roles & self._OWNER_CHECK_BYPASS_ROLES:
             return
-        owner = candidate.get("owner_actor_id", "legacy-owner")
-        if owner != self.principal.actor_id:
+        owner = candidate.get("owner_actor_id")
+        if owner is not None and owner != self.principal.actor_id:
             raise NotFoundError(f"candidate {candidate.get('id')} not found")
 
     def _owned_candidate(self, candidate_id: str) -> dict[str, Any]:
@@ -305,8 +329,16 @@ class AgentService:
         exclude_job_ids（如会话内已推荐过的岗位）不会被剔除，而是排到未展示
         岗位之后：优先出新岗位，新岗位不足 limit 时按分数回填，保证"换一批"
         既有差异性又不返回空列表。
+
+        Owner-checked like every other personal-candidate method (get/update/
+        consent/delete/matches/feedback) — reachable via the chat tool-calling
+        path and the platform ``find_matches`` action with a caller-supplied
+        candidate_id, neither of which independently verifies ownership.
+        OPERATOR/ADMIN bypass, matching the ops-triggered bulk callers
+        (POST /matches/run) that legitimately run matching across every
+        candidate in the tenant.
         """
-        candidate = self._required("candidate", candidate_id)
+        candidate = self._owned_candidate(candidate_id)
         expansion_failed = False
 
         def expand_skills(names: list[str]) -> set[str]:
@@ -519,7 +551,10 @@ class AgentService:
     def preview_digest(
         self, candidate_id: str, match_ids: list[str], actor: str, base_url: str
     ) -> dict[str, Any]:
-        candidate = self._required("candidate", candidate_id)
+        # Owner-checked for the same reason as run_matches (see its
+        # docstring) — OPERATOR/ADMIN bypass for the ops notification
+        # pipeline (POST /notifications/preview).
+        candidate = self._owned_candidate(candidate_id)
         if candidate.get("consent_status") != "opted_in":
             raise PolicyError("candidate is not opted in")
         if candidate.get("notification_frequency") == "paused":

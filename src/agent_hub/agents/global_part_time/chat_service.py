@@ -94,6 +94,15 @@ class ChatService:
             raise NotFoundError(f"chat_session {session_id} not found")
         return session
 
+    def assert_session_owned(self, session_id: str) -> None:
+        """Public entry point for callers (e.g. the stream-resume HTTP route)
+        that only need to assert ownership before doing something else with
+        ``session_id`` — everything internal to ChatService goes through
+        ``_owned_session`` directly since it also needs the session payload.
+        Raises NotFoundError on a missing or not-owned session.
+        """
+        self._owned_session(session_id)
+
     def create_session(self, actor: str = "anonymous") -> dict[str, Any]:
         session_id = str(uuid.uuid4())
         owner = self.principal.actor_id if self.principal is not None else actor

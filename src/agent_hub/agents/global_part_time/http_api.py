@@ -913,7 +913,7 @@ def resume_chat_stream(
     # Raises NotFoundError (-> 404 via the app-level exception handler) if
     # the session doesn't exist or isn't owned by this principal, before we
     # ever touch the stream hub.
-    chat_svc._owned_session(session_id)
+    chat_svc.assert_session_owned(session_id)
 
     hub = getattr(request.app.state, "stream_hub", None)
     if hub is None or not hub.available():
