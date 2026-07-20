@@ -12,9 +12,11 @@ from agent_hub.core.security import (
 )
 
 
-def _app(mode="trusted_gateway", secret="secret"):
+def _app(mode="trusted_gateway", secret="secret", auth_jwt_secret=None):
     app = FastAPI()
-    app.add_middleware(IdentityMiddleware, mode=mode, gateway_secret=secret)
+    app.add_middleware(
+        IdentityMiddleware, mode=mode, gateway_secret=secret, auth_jwt_secret=auth_jwt_secret
+    )
 
     @app.get("/protected", dependencies=[require_roles(Role.OPERATOR)])
     def protected():
@@ -111,3 +113,150 @@ def test_identity_middleware_does_not_bypass_similar_path():
     response = _app().get("/health/details")
 
     assert response.status_code == 401
+
+
+def test_bearer_token_builds_trusted_principal():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": ["operator"]},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+
+
+def test_bearer_token_with_wrong_secret_is_rejected():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": ["operator"]},
+        "wrong-secret-that-is-also-32-plus-chars",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_bearer_token_with_unknown_role_is_rejected():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": ["superuser"]},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_bearer_path_ignored_when_no_secret_configured_falls_back_to_headers():
+    client = _app(auth_jwt_secret=None)
+
+    response = client.get(
+        "/protected",
+        headers={
+            "Authorization": "Bearer whatever",
+            "X-Actor": "op-1",
+            "X-Tenant-Id": "acme",
+            "X-Roles": "operator",
+            "X-Gateway-Token": "secret",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_auth_endpoints_are_bypassed_by_identity_middleware():
+    client = _app()
+
+    response = client.get("/auth/login")  # no route registered, but must not 401
+
+    assert response.status_code == 404
+
+
+def test_bearer_token_with_null_roles_claim_returns_401_not_500():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": None},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_bearer_token_with_non_list_roles_claim_returns_401_not_500():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": 123},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_bearer_token_with_dict_roles_claim_returns_401_not_500():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": {"operator": None}},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_bearer_token_with_non_string_role_in_list_returns_401_not_500():
+    import jwt
+
+    token = jwt.encode(
+        {"sub": "user-1", "tenant_id": "acme", "roles": [123]},
+        "jwt-secret-that-is-at-least-32-chars-long",
+        algorithm="HS256",
+    )
+    client = _app(auth_jwt_secret="jwt-secret-that-is-at-least-32-chars-long")
+
+    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+
+
+def test_security_settings_rejects_short_auth_jwt_secret(monkeypatch):
+    monkeypatch.setenv("SECURITY_MODE", "development")
+    monkeypatch.setenv("AUTH_JWT_SECRET", "too-short")
+
+    with pytest.raises(RuntimeError, match="AUTH_JWT_SECRET must be at least 32 characters"):
+        SecuritySettings.from_env()
+
+
+def test_security_settings_accepts_auth_jwt_secret_at_minimum_length(monkeypatch):
+    monkeypatch.setenv("SECURITY_MODE", "development")
+    monkeypatch.setenv("AUTH_JWT_SECRET", "x" * 32)
+
+    settings = SecuritySettings.from_env()
+
+    assert settings.auth_jwt_secret == "x" * 32

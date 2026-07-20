@@ -8,7 +8,15 @@ async function render(pathname) {
 
   try {
     return await worker.fetch(
-      new Request(`http://localhost${pathname}`, { headers: { accept: "text/html" } }),
+      new Request(`http://localhost${pathname}`, {
+        headers: {
+          accept: "text/html",
+          // middleware.ts only checks for cookie *presence*, not validity —
+          // this simulates an authenticated request so these render tests
+          // can exercise pages now behind the /jobs, /chat, /agents auth gate.
+          cookie: "access_token=test-render-token",
+        },
+      }),
       { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
       { waitUntil() {}, passThroughOnException() {} },
     );

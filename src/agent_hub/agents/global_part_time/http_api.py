@@ -169,6 +169,10 @@ class UnsubscribeRequest(APIModel):
 
 
 IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)]
+# `create_chat_session` and `upload_chat_resume` derive the actor from
+# `Depends(get_principal)` instead of this header — deliberately, not an
+# oversight. Every other endpoint below still uses the raw X-Actor header;
+# migrating them to Principal-based identity is a separate, larger effort.
 Actor = Annotated[str, Header(alias="X-Actor", min_length=1, max_length=200)]
 RequestId = Annotated[str | None, Header(alias="X-Request-Id", max_length=200)]
 
@@ -822,11 +826,10 @@ class ChatMessageRequest(APIModel):
 
 @router.post("/chat/sessions", status_code=201)
 def create_chat_session(
-    actor: Actor,
     chat_svc: ChatServiceDep,
-    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
+    principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ) -> dict[str, Any]:
-    return chat_svc.create_session(actor=actor)
+    return chat_svc.create_session(actor=principal.actor_id)
 
 
 @router.get("/chat/sessions")
@@ -929,10 +932,11 @@ def upload_chat_resume(
     session_id: str,
     file: UploadFile,
     request: Request,
-    actor: Actor,
     chat_svc: ChatServiceDep,
-    _principal: Principal = require_roles(Role.USER, Role.ADMIN),
+    principal: Principal = require_roles(Role.USER, Role.ADMIN),
 ):
+    actor = principal.actor_id
+
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         return JSONResponse(status_code=422, content={"detail": "仅支持 PDF 文件"})
 
