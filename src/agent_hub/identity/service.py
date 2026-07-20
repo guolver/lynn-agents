@@ -9,6 +9,7 @@ philosophy (see ``app.py``'s ``create_app`` docstring).
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,6 +25,8 @@ from .crypto import (
 from .domain import normalize_email, validate_email, validate_password
 from .rate_limiter import LoginRateLimiterProtocol
 from .repository import DuplicateEmailError, IdentityRepository
+
+logger = logging.getLogger(__name__)
 
 ACCESS_TOKEN_TTL_SECONDS = int(ACCESS_TOKEN_TTL.total_seconds())
 
@@ -81,12 +84,15 @@ class IdentityService:
         except DuplicateEmailError:
             raise EmailAlreadyRegisteredError(email) from None
         tokens = self._issue_tokens(user)
-        self._repo.audit(
-            event="user.registered",
-            tenant_id=user["tenant_id"],
-            actor=user["id"],
-            details={"email": user["email"]},
-        )
+        try:
+            self._repo.audit(
+                event="user.registered",
+                tenant_id=user["tenant_id"],
+                actor=user["id"],
+                details={"email": user["email"]},
+            )
+        except Exception:
+            logger.warning("Failed to write audit log for user.registered", exc_info=True)
         return tokens
 
     def login(self, email: str, password: str) -> dict[str, Any]:
@@ -100,21 +106,27 @@ class IdentityService:
         password_ok = verify_password(password, password_hash)
         if user is None or not password_ok:
             self._rate_limiter.record_failure(rate_key)
-            self._repo.audit(
-                event="user.login_failed",
-                tenant_id=self._tenant_id,
-                actor=email,
-                details=None,
-            )
+            try:
+                self._repo.audit(
+                    event="user.login_failed",
+                    tenant_id=self._tenant_id,
+                    actor=email,
+                    details=None,
+                )
+            except Exception:
+                logger.warning("Failed to write audit log for user.login_failed", exc_info=True)
             raise InvalidCredentialsError()
 
         self._rate_limiter.reset(rate_key)
-        self._repo.audit(
-            event="user.login_succeeded",
-            tenant_id=user["tenant_id"],
-            actor=user["id"],
-            details=None,
-        )
+        try:
+            self._repo.audit(
+                event="user.login_succeeded",
+                tenant_id=user["tenant_id"],
+                actor=user["id"],
+                details=None,
+            )
+        except Exception:
+            logger.warning("Failed to write audit log for user.login_succeeded", exc_info=True)
         return self._issue_tokens(user)
 
     def refresh(self, refresh_token: str) -> dict[str, Any]:
@@ -126,24 +138,30 @@ class IdentityService:
         if user is None:
             raise InvalidRefreshTokenError()
         tokens = self._issue_tokens(user)
-        self._repo.audit(
-            event="user.token_refreshed",
-            tenant_id=user["tenant_id"],
-            actor=user["id"],
-            details=None,
-        )
+        try:
+            self._repo.audit(
+                event="user.token_refreshed",
+                tenant_id=user["tenant_id"],
+                actor=user["id"],
+                details=None,
+            )
+        except Exception:
+            logger.warning("Failed to write audit log for user.token_refreshed", exc_info=True)
         return tokens
 
     def logout(self, refresh_token: str) -> None:
         record = self._repo.get_refresh_token(hash_refresh_token(refresh_token))
         if record is not None and record["revoked_at"] is None:
             self._repo.revoke_refresh_token(record["id"])
-            self._repo.audit(
-                event="user.logged_out",
-                tenant_id=record["tenant_id"],
-                actor=record["user_id"],
-                details=None,
-            )
+            try:
+                self._repo.audit(
+                    event="user.logged_out",
+                    tenant_id=record["tenant_id"],
+                    actor=record["user_id"],
+                    details=None,
+                )
+            except Exception:
+                logger.warning("Failed to write audit log for user.logged_out", exc_info=True)
 
     def _issue_tokens(self, user: dict[str, Any]) -> dict[str, Any]:
         roles = user["roles"].split(",")

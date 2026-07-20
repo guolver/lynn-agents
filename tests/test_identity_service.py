@@ -263,3 +263,18 @@ class TestIdentityService(unittest.TestCase):
         self.service.logout(tokens["refresh_token"])  # already revoked — no-op
         after = len(self._audit_rows("user.logged_out", actor=user_id))
         self.assertEqual(before, after)
+
+    def test_register_succeeds_even_if_audit_logging_fails(self):
+        original_audit = self.repo.audit
+
+        def broken_audit(*args, **kwargs):
+            raise RuntimeError("simulated audit sink failure")
+
+        self.repo.audit = broken_audit
+        try:
+            tokens = self.service.register(self.email, self.password)
+        finally:
+            self.repo.audit = original_audit
+
+        self.assertIn("access_token", tokens)
+        self.assertIn("refresh_token", tokens)
