@@ -35,12 +35,35 @@ class _TagStripper(HTMLParser):
 
 _SAFE_TAGS = frozenset(
     [
-        "p", "br", "strong", "b", "em", "i", "u",
-        "h1", "h2", "h3", "h4", "h5", "h6",
-        "ul", "ol", "li",
-        "a", "span", "div",
-        "table", "thead", "tbody", "tr", "th", "td",
-        "blockquote", "pre", "code", "hr",
+        "p",
+        "br",
+        "strong",
+        "b",
+        "em",
+        "i",
+        "u",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ul",
+        "ol",
+        "li",
+        "a",
+        "span",
+        "div",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "blockquote",
+        "pre",
+        "code",
+        "hr",
     ]
 )
 
@@ -433,16 +456,22 @@ def sanitize_html(html: str) -> str:
 
 def get_fetcher(base_url: str) -> tuple[Callable, Callable] | None:
     """Return ``(fetch_fn, map_job_fn)`` for *base_url*, or ``None`` if unrecognised."""
+    from .arbeitnow import fetch as arbeitnow_fetch, map_job as arbeitnow_map
     from .himalayas import fetch as himalayas_fetch, map_job as himalayas_map
     from .jobicy import fetch as jobicy_fetch, map_job as jobicy_map
     from .remoteok import fetch as remoteok_fetch, map_job as remoteok_map
     from .remotive import fetch as remotive_fetch, map_job as remotive_map
+    from .weworkremotely import fetch as weworkremotely_fetch, map_job as weworkremotely_map
+    from .workingnomads import fetch as workingnomads_fetch, map_job as workingnomads_map
 
     _REGISTRY: dict[str, tuple[Callable, Callable]] = {
         "remoteok.com": (remoteok_fetch, remoteok_map),
         "remotive.com": (remotive_fetch, remotive_map),
         "jobicy.com": (jobicy_fetch, jobicy_map),
         "himalayas.app": (himalayas_fetch, himalayas_map),
+        "arbeitnow.com": (arbeitnow_fetch, arbeitnow_map),
+        "workingnomads.com": (workingnomads_fetch, workingnomads_map),
+        "weworkremotely.com": (weworkremotely_fetch, weworkremotely_map),
     }
     for domain, funcs in _REGISTRY.items():
         if domain in base_url:
