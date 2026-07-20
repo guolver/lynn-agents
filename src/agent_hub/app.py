@@ -52,6 +52,7 @@ def create_app(
     settings = security_settings or SecuritySettings.from_env()
     repo = repository or create_repository()
     expand_fn = None
+    expand_evidence_fn = None
     neo4j_driver = None
 
     def close_neo4j_driver() -> None:
@@ -74,6 +75,7 @@ def create_app(
             skill_graph = SkillGraphService(neo4j_driver)
             skill_graph.seed()
             expand_fn = skill_graph.expand
+            expand_evidence_fn = skill_graph.expand_with_evidence
             logger.info("Skill graph initialized from Neo4j at %s", neo4j_uri)
 
             from .api.skill_graph import create_skill_graph_router
@@ -102,7 +104,9 @@ def create_app(
     #     construct AgentService/ChatService directly (worker/tasks.py), and
     #   - tests that inspect or exercise the app-level singleton directly
     #     (test_app_skill_graph_lifecycle.py, test_chat_stream_api.py).
-    part_time_service = AgentService(repo, expand_fn=expand_fn, embed_fn=embed_fn)
+    part_time_service = AgentService(
+        repo, expand_fn=expand_fn, embed_fn=embed_fn, expand_evidence_fn=expand_evidence_fn
+    )
 
     from .agents.global_part_time.chat_service import ChatService
     from .observability import get_chat_tracer

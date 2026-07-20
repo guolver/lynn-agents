@@ -21,6 +21,7 @@ class SkillGraphLifecycleTest(unittest.TestCase):
 
         driver.close.assert_called_once_with()
         self.assertIsNone(application.state.part_time_service.expand_fn)
+        self.assertIsNone(application.state.part_time_service.expand_evidence_fn)
 
     @patch.dict("os.environ", {"NEO4J_URI": "bolt://graph.example:7687"})
     @patch("agent_hub.skill_graph.service.SkillGraphService")
@@ -30,10 +31,12 @@ class SkillGraphLifecycleTest(unittest.TestCase):
     ):
         driver = create_driver.return_value
         expand_fn = service_type.return_value.expand
+        expand_evidence_fn = service_type.return_value.expand_with_evidence
 
         application = create_app(Repository(":memory:"))
 
         self.assertIs(application.state.part_time_service.expand_fn, expand_fn)
+        self.assertIs(application.state.part_time_service.expand_evidence_fn, expand_evidence_fn)
         driver.close.assert_not_called()
         with TestClient(application) as client:
             self.assertEqual(client.get("/health").status_code, 200)

@@ -5,9 +5,24 @@ from agent_hub.agents.global_part_time.domain import (
     dedup_key,
     hard_filter,
     score_match,
+    score_match_with_evidence,
     timezone_matches,
 )
+from agent_hub.skill_graph.types import ExpansionEvidence, ExpansionResult
 from tests.factories import candidate_payload, job_payload
+
+
+def evidence(source, target, relations, nodes, weight, target_kind="skill", canonical=None):
+    return ExpansionEvidence(
+        source,
+        canonical or source,
+        target,
+        target_kind,
+        tuple(relations),
+        tuple(nodes),
+        len(relations),
+        weight,
+    )
 
 
 class DomainRulesTest(unittest.TestCase):
@@ -346,6 +361,337 @@ class CompletenessWeightingTests(unittest.TestCase):
         _, breakdown, _ = score_match(self.candidate, job)
         self.assertEqual(breakdown["skills"], 0.0)
         self.assertNotIn("skills", breakdown["uninformative"])
+
+
+class WeightedSkillEvidenceTest(unittest.TestCase):
+    def test_normalized_direct_match_uses_required_canonical_evidence(self):
+        def expand(names):
+            if names == ["Python"]:
+                return ExpansionResult.from_iterable(
+                    [evidence("Python", "Python", [], ["Python"], 1.0)]
+                )
+            return ExpansionResult()
+
+        _, breakdown, reasons, graph = score_match_with_evidence(
+            {"skills": [{"name": "python"}]},
+            {"skills": ["Python"]},
+            expand,
+        )
+
+        self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(reasons[0], "技能python与职位要求Python直接匹配")
+        self.assertEqual(
+            graph["requirements"],
+            [
+                {
+                    "required_skill": "Python",
+                    "candidate_skill": "python",
+                    "score": 1.0,
+                    "path": {
+                        "input_skill": "Python",
+                        "canonical_skill": "Python",
+                        "target": "Python",
+                        "target_kind": "skill",
+                        "relations": [],
+                        "nodes": ["Python"],
+                        "depth": 0,
+                        "weight": 1.0,
+                    },
+                }
+            ],
+        )
+
+    def test_identical_unknown_skill_keeps_direct_score_and_evidence(self):
+        def expand(_names):
+            return ExpansionResult()
+
+        _, breakdown, reasons, graph = score_match_with_evidence(
+            {"skills": [{"name": "WebAssembly"}]},
+            {"skills": ["WebAssembly"]},
+            expand,
+        )
+
+        self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(reasons[0], "技能WebAssembly与职位要求WebAssembly直接匹配")
+        self.assertEqual(
+            graph,
+            {
+                "requirements": [
+                    {
+                        "required_skill": "WebAssembly",
+                        "candidate_skill": "WebAssembly",
+                        "score": 1.0,
+                        "path": {
+                            "input_skill": "WebAssembly",
+                            "canonical_skill": "WebAssembly",
+                            "target": "WebAssembly",
+                            "target_kind": "skill",
+                            "relations": [],
+                            "nodes": ["WebAssembly"],
+                            "depth": 0,
+                            "weight": 1.0,
+                        },
+                    }
+                ]
+            },
+        )
+
+    def test_direct_and_alias_match_score_one(self):
+        # K8s canonicalizes to Kubernetes on the required side.
+        def expand(names):
+            values = []
+            for name in names:
+                canonical = "Kubernetes" if name == "K8s" else name
+                values.append(evidence(name, canonical, [], [canonical], 1.0, canonical=canonical))
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "Kubernetes"}]}, {"skills": ["K8s"]}, expand
+        )
+        self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(graph["requirements"][0]["score"], 1.0)
+
+    def test_requires_direction_and_weight(self):
+        # Only job-side Kubernetes expansion reaches candidate-owned Docker.
+        def expand(names):
+            values = [evidence(name, name, [], [name], 1.0) for name in names]
+            if names == ["Kubernetes"]:
+                values.append(
+                    evidence(
+                        "Kubernetes",
+                        "Docker",
+                        ["REQUIRES"],
+                        ["Kubernetes", "Docker"],
+                        0.75,
+                    )
+                )
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "Docker"}]}, {"skills": ["Kubernetes"]}, expand
+        )
+        self.assertEqual(breakdown["skills"], 0.75)
+        self.assertEqual(graph["requirements"][0]["path"]["relations"], ["REQUIRES"])
+
+    def test_related_and_two_hop_weights(self):
+        cases = [
+            (
+                "one hop",
+                evidence("React", "Vue", ["RELATED_TO"], ["React", "Vue"], 0.4),
+                0.4,
+            ),
+            (
+                "two hops",
+                evidence(
+                    "Next.js",
+                    "Vue",
+                    ["REQUIRES", "RELATED_TO"],
+                    ["Next.js", "React", "Vue"],
+                    0.2,
+                ),
+                0.2,
+            ),
+        ]
+        for label, path, expected in cases:
+            with self.subTest(label=label):
+
+                def expand(names):
+                    values = [evidence(name, name, [], [name], 1.0) for name in names]
+                    if names == [path.input_skill]:
+                        values.append(path)
+                    return ExpansionResult.from_iterable(values)
+
+                _, breakdown, _, graph = score_match_with_evidence(
+                    {"skills": [{"name": "Vue"}]},
+                    {"skills": [path.input_skill]},
+                    expand,
+                )
+                self.assertEqual(breakdown["skills"], expected)
+                self.assertEqual(graph["requirements"][0]["score"], expected)
+
+    def test_shared_category_does_not_match_two_concrete_skills(self):
+        def expand(names):
+            values = [evidence(name, name, [], [name], 1.0) for name in names]
+            for name in names:
+                if name in {"React", "Vue"}:
+                    values.append(
+                        evidence(
+                            name,
+                            "前端开发",
+                            ["CHILD_OF"],
+                            [name, "前端开发"],
+                            0.65,
+                            target_kind="category",
+                        )
+                    )
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "React"}]}, {"skills": ["Vue"]}, expand
+        )
+        self.assertEqual(breakdown["skills"], 0.0)
+        self.assertIsNone(graph["requirements"][0]["path"])
+
+    def test_tie_break_uses_weight_depth_then_lexical_path(self):
+        def expand(names):
+            values = [evidence(name, name, [], [name], 1.0) for name in names]
+            if names == ["Framework"]:
+                values.extend(
+                    [
+                        evidence(
+                            "Framework",
+                            "React",
+                            ["RELATED_TO", "RELATED_TO"],
+                            ["Framework", "Angular", "React"],
+                            0.2,
+                        ),
+                        evidence(
+                            "Framework",
+                            "React",
+                            ["RELATED_TO", "RELATED_TO"],
+                            ["Framework", "Vue", "React"],
+                            0.2,
+                        ),
+                    ]
+                )
+            return ExpansionResult.from_iterable(values)
+
+        _, _, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "React"}]}, {"skills": ["Framework"]}, expand
+        )
+        self.assertEqual(
+            graph["requirements"][0]["path"]["nodes"],
+            ["Framework", "Angular", "React"],
+        )
+
+    def test_candidate_related_to_requires_path_is_rejected(self):
+        def expand(names):
+            values = [evidence(name, name, [], [name], 1.0) for name in names]
+            if names == ["Framework"]:
+                values.append(
+                    evidence(
+                        "Framework",
+                        "React",
+                        ["RELATED_TO", "REQUIRES"],
+                        ["Framework", "Library", "React"],
+                        0.2,
+                    )
+                )
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "Framework"}]}, {"skills": ["React"]}, expand
+        )
+
+        self.assertEqual(breakdown["skills"], 0.0)
+        self.assertIsNone(graph["requirements"][0]["path"])
+
+    def test_candidate_requires_to_child_of_path_is_rejected(self):
+        def expand(names):
+            values = [
+                evidence(
+                    name,
+                    name,
+                    [],
+                    [name],
+                    1.0,
+                    target_kind="category" if name == "前端开发" else "skill",
+                )
+                for name in names
+            ]
+            if names == ["Next.js"]:
+                values.append(
+                    evidence(
+                        "Next.js",
+                        "前端开发",
+                        ["REQUIRES", "CHILD_OF"],
+                        ["Next.js", "React", "前端开发"],
+                        0.325,
+                        target_kind="category",
+                    )
+                )
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "Next.js"}]}, {"skills": ["前端开发"]}, expand
+        )
+
+        self.assertEqual(breakdown["skills"], 0.0)
+        self.assertIsNone(graph["requirements"][0]["path"])
+
+    def test_candidate_related_to_path_matches_symmetrically(self):
+        def expand(names):
+            values = [evidence(name, name, [], [name], 1.0) for name in names]
+            if names == ["React"]:
+                values.append(evidence("React", "Vue", ["RELATED_TO"], ["React", "Vue"], 0.4))
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "React"}]}, {"skills": ["Vue"]}, expand
+        )
+
+        self.assertEqual(breakdown["skills"], 0.4)
+        self.assertEqual(graph["requirements"][0]["path"]["relations"], ["RELATED_TO"])
+
+    def test_candidate_child_of_path_matches_required_category(self):
+        def expand(names):
+            values = [
+                evidence(
+                    name,
+                    name,
+                    [],
+                    [name],
+                    1.0,
+                    target_kind="category" if name == "前端开发" else "skill",
+                )
+                for name in names
+            ]
+            if names == ["React"]:
+                values.append(
+                    evidence(
+                        "React",
+                        "前端开发",
+                        ["CHILD_OF"],
+                        ["React", "前端开发"],
+                        0.65,
+                        target_kind="category",
+                    )
+                )
+            return ExpansionResult.from_iterable(values)
+
+        _, breakdown, _, graph = score_match_with_evidence(
+            {"skills": [{"name": "React"}]}, {"skills": ["前端开发"]}, expand
+        )
+
+        self.assertEqual(breakdown["skills"], 0.65)
+        self.assertEqual(graph["requirements"][0]["path"]["relations"], ["CHILD_OF"])
+
+    def test_graph_winner_does_not_reuse_legacy_generic_fallback_reason(self):
+        def expand(names):
+            values = []
+            for name in names:
+                canonical = "Kubernetes" if name == "K8s" else name
+                values.append(evidence(name, canonical, [], [canonical], 1.0, canonical=canonical))
+            return ExpansionResult.from_iterable(values)
+
+        candidate = {
+            "skills": [{"name": "Kubernetes"}],
+            "country": "CN",
+            "timezone": None,
+            "desired_roles": ["backend"],
+            "minimum_hourly_rate": {"amount": 100},
+        }
+        job = {
+            "skills": ["K8s"],
+            "countries_allowed": ["US"],
+            "timezone_requirements": ["UTC-05:00"],
+            "categories": ["frontend"],
+            "compensation_max": 10,
+        }
+
+        _, _, reasons, _ = score_match_with_evidence(candidate, job, expand)
+
+        self.assertNotIn("该职位通过了你的全部硬性条件", reasons)
 
 
 if __name__ == "__main__":

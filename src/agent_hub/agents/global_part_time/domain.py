@@ -14,6 +14,8 @@ from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from agent_hub.skill_graph.types import ExpansionEvidence, ExpansionResult
+
 
 RULE_VERSION = "2026-07-19.2"
 SCORE_WEIGHTS = {
@@ -276,15 +278,21 @@ def _skill_score(
     return min(score, 1.0), True, direct, indirect
 
 
-def score_match(
+def _score_from_dimensions(
     candidate: dict[str, Any],
     job: dict[str, Any],
-    expand_fn: Callable[[list[str]], set[str]] | None = None,
+    skill: float,
+    skill_inf: bool,
+    skill_reasons: list[str],
     embed_fn: Callable[[str], list[float] | None] | None = None,
     semantic_similarity: float | None = None,
 ) -> tuple[float, dict[str, Any], list[str]]:
-    """信息完备度加权打分：无信息分项剔除，剩余分项归一化后乘完备度折扣。"""
-    skill, skill_inf, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
+    """信息完备度加权打分：无信息分项剔除，剩余分项归一化后乘完备度折扣。
+
+    ``skill``/``skill_inf``/``skill_reasons`` are precomputed by the caller so this
+    aggregation is shared between the legacy set-expansion skill scorer and the
+    skill-graph evidence scorer.
+    """
     semantic, semantic_inf = _semantic_score(
         candidate, job, embed_fn, precomputed=semantic_similarity
     )
@@ -344,13 +352,7 @@ def score_match(
     breakdown["completeness"] = completeness
     breakdown["uninformative"] = sorted(k for k, v in informative.items() if not v)
 
-    positive_reasons = []
-    if direct_skills:
-        positive_reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
-    if indirect_skills:
-        positive_reasons.append(
-            f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关"
-        )
+    positive_reasons = list(skill_reasons)
     if semantic_inf and semantic >= 0.7:
         positive_reasons.append("简历经历与岗位职责语义高度相似")
     elif semantic_inf and semantic >= 0.35:
@@ -378,3 +380,203 @@ def score_match(
     if completeness < LOW_COMPLETENESS_THRESHOLD:
         reasons.append("职位信息不完整，评分仅供参考")
     return total, breakdown, reasons or ["该职位通过了你的全部硬性条件"]
+
+
+def score_match(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    expand_fn: Callable[[list[str]], set[str]] | None = None,
+    embed_fn: Callable[[str], list[float] | None] | None = None,
+    semantic_similarity: float | None = None,
+) -> tuple[float, dict[str, Any], list[str]]:
+    """历史三元组签名：直接/集合扩展技能打分 + 信息完备度加权。"""
+    skill, skill_inf, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
+    skill_reasons = []
+    if direct_skills:
+        skill_reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
+    if indirect_skills:
+        skill_reasons.append(f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关")
+    return _score_from_dimensions(
+        candidate, job, skill, skill_inf, skill_reasons, embed_fn, semantic_similarity
+    )
+
+
+def _legacy_score_match(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    expand_fn: Callable[[list[str]], set[str]] | None = None,
+    embed_fn: Callable[[str], list[float] | None] | None = None,
+    semantic_similarity: float | None = None,
+) -> tuple[float, dict[str, Any], list[str]]:
+    """技能维度回退路径：无 skill-graph evidence 时，用集合扩展打分。"""
+    skill, skill_inf, direct_skills, indirect_skills = _skill_score(candidate, job, expand_fn)
+    skill_reasons = []
+    if direct_skills:
+        skill_reasons.append(f"技能{', '.join(direct_skills)}与职位要求直接匹配")
+    if indirect_skills:
+        skill_reasons.append(f"候选人技能通过类别扩展与职位要求的{', '.join(indirect_skills)}相关")
+    if not direct_skills and not indirect_skills and skill >= 0.5:
+        skill_reasons.append("技能与职位要求高度匹配")
+    return _score_from_dimensions(
+        candidate, job, skill, skill_inf, skill_reasons, embed_fn, semantic_similarity
+    )
+
+
+ExpandEvidenceFn = Callable[[list[str]], ExpansionResult]
+
+
+def _best_path(paths: list[ExpansionEvidence]) -> ExpansionEvidence | None:
+    if not paths:
+        return None
+    return min(paths, key=lambda item: (-item.weight, item.depth, item.nodes, item.relations))
+
+
+def _canonical_zero_paths(expansion: ExpansionResult) -> list[ExpansionEvidence]:
+    return [item for item in expansion.evidence if item.depth == 0]
+
+
+def _graph_skill_score(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    expand_evidence_fn: ExpandEvidenceFn,
+) -> tuple[float, list[str], dict[str, Any]]:
+    owned_raw = [
+        item["name"] if isinstance(item, dict) else item for item in candidate.get("skills") or []
+    ]
+    required_raw = list(job.get("skills") or [])
+    candidate_expansion = expand_evidence_fn(owned_raw)
+    required_expansions = {required: expand_evidence_fn([required]) for required in required_raw}
+    owned_raw_by_normalized = {
+        normalized: min(name for name in owned_raw if _norm(name) == normalized)
+        for normalized in {_norm(name) for name in owned_raw}
+    }
+
+    owned_zero = _canonical_zero_paths(candidate_expansion)
+    owned_canonical = {
+        _norm(item.canonical_skill): item.canonical_skill
+        for item in owned_zero
+        if item.target_kind == "skill"
+    }
+    requirement_records: list[dict[str, Any]] = []
+    reasons: list[str] = []
+    scores: list[float] = []
+
+    for required in required_raw:
+        required_expansion = required_expansions[required]
+        required_zero = _canonical_zero_paths(required_expansion)
+        required_canonical = required_zero[0].canonical_skill if required_zero else required
+        required_kind = required_zero[0].target_kind if required_zero else None
+        path_candidates: list[tuple[ExpansionEvidence, str]] = []
+
+        direct_raw_skill = owned_raw_by_normalized.get(_norm(required))
+        if direct_raw_skill is not None and not required_zero:
+            path_candidates.append(
+                (
+                    ExpansionEvidence(
+                        input_skill=required,
+                        canonical_skill=required,
+                        target=required,
+                        target_kind="skill",
+                        relations=(),
+                        nodes=(required,),
+                        depth=0,
+                        weight=1.0,
+                    ),
+                    direct_raw_skill,
+                )
+            )
+
+        # Canonical equality covers both direct names and aliases normalized by the graph.
+        for required_path in required_zero:
+            candidate_skill = direct_raw_skill or owned_canonical.get(
+                _norm(required_path.canonical_skill)
+            )
+            if candidate_skill is not None:
+                path_candidates.append((required_path, candidate_skill))
+
+        for path in candidate_expansion.evidence:
+            candidate_skill = owned_canonical.get(_norm(path.canonical_skill))
+            if candidate_skill is None or path.depth == 0:
+                continue
+            target_is_required = _norm(path.target) == _norm(required_canonical)
+            if not target_is_required:
+                continue
+
+            # Candidate-side CHILD_OF is valid only when it terminates at the required category.
+            category_match = (
+                required_kind == "category"
+                and path.target_kind == "category"
+                and path.relations[-1] == "CHILD_OF"
+                and "REQUIRES" not in path.relations
+            )
+            # Candidate-side concrete matching must start with symmetric RELATED_TO.
+            related_match = (
+                required_kind == "skill"
+                and path.target_kind == "skill"
+                and path.relations[0] == "RELATED_TO"
+                and "REQUIRES" not in path.relations
+            )
+            if category_match or related_match:
+                path_candidates.append((path, candidate_skill))
+
+        for path in required_expansion.evidence:
+            if path.depth == 0 or path.target_kind != "skill":
+                continue
+            candidate_skill = owned_canonical.get(_norm(path.target))
+            if candidate_skill is None:
+                continue
+            # Job-side REQUIRES is directional; RELATED_TO is symmetric.
+            if path.relations[0] in {"REQUIRES", "RELATED_TO"}:
+                path_candidates.append((path, candidate_skill))
+
+        best = _best_path([path for path, _ in path_candidates])
+        candidate_skill = next(
+            (skill for path, skill in path_candidates if path is best),
+            None,
+        )
+        score = best.weight if best is not None else 0.0
+        scores.append(score)
+        requirement_records.append(
+            {
+                "required_skill": required,
+                "candidate_skill": candidate_skill,
+                "score": score,
+                "path": best.to_dict() if best is not None else None,
+            }
+        )
+        if best is not None:
+            if best.depth == 0:
+                reasons.append(f"技能{candidate_skill}与职位要求{required}直接匹配")
+            else:
+                relation_path = " → ".join(best.relations)
+                reasons.append(
+                    f"候选人技能{candidate_skill}通过{relation_path}与职位要求{required}匹配"
+                )
+
+    skill = sum(scores) / len(scores) if scores else 0.5
+    return skill, reasons, {"requirements": requirement_records}
+
+
+def score_match_with_evidence(
+    candidate: dict[str, Any],
+    job: dict[str, Any],
+    expand_evidence_fn: ExpandEvidenceFn | None = None,
+    embed_fn: Callable[[str], list[float] | None] | None = None,
+    semantic_similarity: float | None = None,
+) -> tuple[float, dict[str, Any], list[str], dict[str, Any]]:
+    """Return the normal match result plus deterministic skill-graph evidence."""
+    if expand_evidence_fn is None:
+        total, breakdown, reasons = _legacy_score_match(
+            candidate, job, embed_fn=embed_fn, semantic_similarity=semantic_similarity
+        )
+        return total, breakdown, reasons, {"requirements": []}
+
+    skill_inf = bool(job.get("skills"))
+    if skill_inf:
+        skill, graph_reasons, graph = _graph_skill_score(candidate, job, expand_evidence_fn)
+    else:
+        skill, graph_reasons, graph = 0.0, [], {"requirements": []}
+    total, breakdown, reasons = _score_from_dimensions(
+        candidate, job, skill, skill_inf, graph_reasons, embed_fn, semantic_similarity
+    )
+    return total, breakdown, reasons, graph

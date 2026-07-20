@@ -1,4 +1,4 @@
-.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg test-worker worker format clean infra infra-up infra-down migrate up down logs
+.PHONY: setup dev dev-api dev-web lint lint-py lint-fe test test-py test-pg test-neo4j test-worker worker format clean infra infra-up infra-down migrate up down logs
 
 # — 初始化 ————————————————————————————————————
 
@@ -44,6 +44,9 @@ test-pg: ## PostgreSQL 集成测试（需要运行 make infra-up && make migrate
 test-worker: ## Celery 集成测试（需要 Redis + PostgreSQL）
 	. .venv/bin/activate && TEST_DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@127.0.0.1:5432/agent_hub_test \
 		python -m unittest tests.test_celery_tasks tests.test_workflow_tracker tests.test_error_classification -v
+
+test-neo4j: ## Neo4j skill graph integration tests (requires Docker image neo4j:5)
+	. .venv/bin/activate && python -m pytest tests/test_skill_graph.py -v
 
 worker: ## 启动 Celery worker
 	. .venv/bin/activate && celery -A agent_hub.worker.celery_app:celery_app worker \

@@ -1,3 +1,4 @@
+import json
 import unittest
 
 
@@ -40,7 +41,7 @@ class SeedAliasValidationTest(unittest.TestCase):
 class Neo4jConfigTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.container = Neo4jContainer("neo4j:5")
+        cls.container = Neo4jContainer("neo4j:5", password="test")
         cls.container.start()
         cls.addClassCleanup(cls.container.stop)
         cls.driver = _driver_for(cls.container)
@@ -54,7 +55,7 @@ class Neo4jConfigTest(unittest.TestCase):
 class SeedDataTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.container = Neo4jContainer("neo4j:5")
+        cls.container = Neo4jContainer("neo4j:5", password="test")
         cls.container.start()
         cls.addClassCleanup(cls.container.stop)
 
@@ -82,7 +83,7 @@ class SeedDataTest(unittest.TestCase):
 class SkillGraphServiceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.container = Neo4jContainer("neo4j:5")
+        cls.container = Neo4jContainer("neo4j:5", password="test")
         cls.container.start()
         cls.addClassCleanup(cls.container.stop)
         from agent_hub.skill_graph.service import SkillGraphService
@@ -118,6 +119,33 @@ class SkillGraphServiceTest(unittest.TestCase):
         result = self.service.expand(["NonExistent"])
         self.assertEqual(result, set())
 
+    def test_expand_with_evidence_rejects_invalid_depth(self):
+        with self.assertRaisesRegex(ValueError, "max_depth must be 1 or 2"):
+            self.service.expand_with_evidence(["React"], max_depth=3)
+
+    def test_requires_is_directional(self):
+        forward = self.service.expand_with_evidence(["Kubernetes"], max_depth=1)
+        reverse = self.service.expand_with_evidence(["Docker"], max_depth=1)
+        self.assertTrue(
+            any(x.target == "Docker" and x.relations == ("REQUIRES",) for x in forward.evidence)
+        )
+        self.assertFalse(
+            any(x.target == "Kubernetes" and "REQUIRES" in x.relations for x in reverse.evidence)
+        )
+
+    def test_related_to_is_symmetric(self):
+        react = self.service.expand_with_evidence(["React"], max_depth=1)
+        vue = self.service.expand_with_evidence(["Vue"], max_depth=1)
+        self.assertTrue(any(x.target == "Vue" and x.weight == 0.4 for x in react.evidence))
+        self.assertTrue(any(x.target == "React" and x.weight == 0.4 for x in vue.evidence))
+
+    def test_two_hop_weight_and_cycle_protection(self):
+        result = self.service.expand_with_evidence(["Next.js"], max_depth=2)
+        vue_paths = [x for x in result.evidence if x.target == "Vue" and x.depth == 2]
+        self.assertEqual(len(vue_paths), 1)
+        self.assertEqual(vue_paths[0].weight, 0.2)
+        self.assertEqual(len(vue_paths[0].nodes), len(set(vue_paths[0].nodes)))
+
     def test_seed_is_idempotent(self):
         self.service.seed()
         self.service.seed()
@@ -130,7 +158,7 @@ class EndToEndSkillMatchTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.container = Neo4jContainer("neo4j:5")
+        cls.container = Neo4jContainer("neo4j:5", password="test")
         cls.container.start()
         cls.addClassCleanup(cls.container.stop)
         from agent_hub.skill_graph.service import SkillGraphService
@@ -181,3 +209,75 @@ class EndToEndSkillMatchTest(unittest.TestCase):
 
         # Direct(Python)=1.0 + Indirect(前端开发)=0.6 → avg = 0.8
         self.assertAlmostEqual(breakdown["skills"], 0.8, places=1)
+
+    def test_reverse_alias_direction_matches_with_real_graph(self):
+        from agent_hub.agents.global_part_time.domain import score_match_with_evidence
+
+        _, breakdown, _, evidence = score_match_with_evidence(
+            {"skills": [{"name": "Kubernetes"}]},
+            {"skills": ["K8s"]},
+            self.service.expand_with_evidence,
+        )
+        self.assertEqual(breakdown["skills"], 1.0)
+        self.assertEqual(evidence["requirements"][0]["score"], 1.0)
+
+    def test_real_graph_requires_path_is_explainable(self):
+        from agent_hub.agents.global_part_time.domain import score_match_with_evidence
+
+        _, breakdown, reasons, evidence = score_match_with_evidence(
+            {"skills": [{"name": "Docker"}]},
+            {"skills": ["Kubernetes"]},
+            self.service.expand_with_evidence,
+        )
+        self.assertEqual(breakdown["skills"], 0.75)
+        path = evidence["requirements"][0]["path"]
+        self.assertEqual(path["relations"], ["REQUIRES"])
+        self.assertEqual(path["nodes"], ["Kubernetes", "Docker"])
+        self.assertEqual(
+            reasons[0],
+            "候选人技能Docker通过REQUIRES与职位要求Kubernetes匹配",
+        )
+
+    def test_real_graph_match_persists_exact_sanitized_evidence(self):
+        from agent_hub.agents.global_part_time.repository import Repository
+        from agent_hub.agents.global_part_time.service import AgentService
+        from tests.factories import candidate_payload, job_payload, source_payload
+
+        repo = Repository(":memory:")
+        service = AgentService(repo, expand_evidence_fn=self.service.expand_with_evidence)
+        source = service.create_source(source_payload(), "operator")
+        service.review_source(source["id"], True, "operator")
+        graph_job = dict(job_payload(), skills=["Kubernetes"])
+        service.sync_source(source["id"], [graph_job], "worker")
+        candidate = service.create_candidate(
+            dict(candidate_payload(), skills=[{"name": "Docker", "level": 4}]),
+            "candidate",
+        )
+        candidate = service.set_consent(candidate["id"], True, "candidate", "mvp-1")
+
+        returned = service.run_matches(candidate["id"], "scheduler")["matches"][0]
+        stored = repo.get("match", returned["id"])
+        expected_requirement = {
+            "required_skill": "Kubernetes",
+            "candidate_skill": "Docker",
+            "score": 0.75,
+            "path": {
+                "input_skill": "Kubernetes",
+                "canonical_skill": "Kubernetes",
+                "target": "Docker",
+                "target_kind": "skill",
+                "relations": ["REQUIRES"],
+                "nodes": ["Kubernetes", "Docker"],
+                "depth": 1,
+                "weight": 0.75,
+            },
+        }
+
+        self.assertEqual(returned["skill_graph_evidence"]["mode"], "graph")
+        self.assertEqual(returned["score_breakdown"]["skills"], 0.75)
+        self.assertEqual(
+            returned["skill_graph_evidence"]["requirements"],
+            [expected_requirement],
+        )
+        self.assertNotIn("exception", json.dumps(returned, ensure_ascii=False).casefold())
+        self.assertEqual(stored, returned)

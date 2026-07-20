@@ -19,9 +19,11 @@ from .domain import (
     dedup_key,
     hard_filter,
     score_match,
+    score_match_with_evidence,
     utcnow,
 )
 from .embedding import build_candidate_text
+from ...skill_graph.types import ExpansionResult
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class AgentService:
         repository: RepositoryProtocol,
         expand_fn: Callable[[list[str]], set[str]] | None = None,
         embed_fn: Callable[[str], list[float] | None] | None = None,
+        expand_evidence_fn: Callable[[list[str]], ExpansionResult] | None = None,
         *,
         principal: Principal | None = None,
         request_id: str | None = None,
@@ -52,6 +55,7 @@ class AgentService:
         self.repo = repository
         self.expand_fn = expand_fn
         self.embed_fn = embed_fn
+        self.expand_evidence_fn = expand_evidence_fn
         # Principal/request_id are optional so worker call sites (which invoke
         # AgentService outside any HTTP request, with no authenticated actor
         # concept) keep working unchanged — see worker/tasks.py. When present,
@@ -340,22 +344,6 @@ class AgentService:
         candidate in the tenant.
         """
         candidate = self._owned_candidate(candidate_id)
-        expansion_failed = False
-
-        def expand_skills(names: list[str]) -> set[str]:
-            nonlocal expansion_failed
-            if self.expand_fn is None or expansion_failed:
-                return set()
-            try:
-                return self.expand_fn(names)
-            except Exception as exc:
-                expansion_failed = True
-                logger.warning(
-                    "Skill graph expansion failed; using direct skill matching: %s",
-                    exc,
-                    exc_info=True,
-                )
-                return set()
 
         embedding_failed = False
 
@@ -374,7 +362,6 @@ class AgentService:
                 )
                 return None
 
-        expand_fn = expand_skills if self.expand_fn is not None else None
         embed_fn = safe_embed if self.embed_fn is not None else None
         existing_matches = {
             item["job_id"]: item
@@ -421,38 +408,65 @@ class AgentService:
                 continue
             eligible_jobs.append(job)
 
-        scored_jobs = []
-        for job in eligible_jobs:
-            scored_jobs.append(
-                (
-                    job,
-                    *score_match(
-                        candidate,
-                        job,
-                        expand_fn,
-                        embed_fn,
-                        semantic_similarity=similarities.get(job["id"]),
-                    ),
+        mode = "graph" if self.expand_evidence_fn or self.expand_fn else "direct"
+        callback_error: Exception | None = None
+
+        def expand_evidence(names: list[str]) -> ExpansionResult:
+            nonlocal callback_error
+            assert self.expand_evidence_fn is not None
+            try:
+                return self.expand_evidence_fn(names)
+            except Exception as exc:
+                callback_error = exc
+                raise
+
+        def expand_legacy(names: list[str]) -> set[str]:
+            nonlocal callback_error
+            assert self.expand_fn is not None
+            try:
+                return self.expand_fn(names)
+            except Exception as exc:
+                callback_error = exc
+                raise
+
+        rich_callback = expand_evidence if self.expand_evidence_fn is not None else None
+        legacy_callback = expand_legacy if self.expand_fn is not None else None
+
+        def score_job(job: dict[str, Any]):
+            similarity = similarities.get(job["id"])
+            if rich_callback is not None:
+                return score_match_with_evidence(
+                    candidate, job, rich_callback, embed_fn, similarity
                 )
+            if legacy_callback is not None:
+                score, breakdown, reasons = score_match(
+                    candidate, job, legacy_callback, embed_fn, similarity
+                )
+                return score, breakdown, reasons, {"requirements": []}
+            return score_match_with_evidence(candidate, job, None, embed_fn, similarity)
+
+        try:
+            scored = [score_job(job) for job in eligible_jobs]
+        except Exception:
+            if callback_error is None:
+                raise
+            logger.warning(
+                "Skill graph expansion failed; recomputing direct batch: %s",
+                type(callback_error).__name__,
+                exc_info=True,
             )
-            if expansion_failed:
-                break
-        if expansion_failed:
-            scored_jobs = [
-                (
-                    job,
-                    *score_match(
-                        candidate,
-                        job,
-                        embed_fn=embed_fn,
-                        semantic_similarity=similarities.get(job["id"]),
-                    ),
+            mode = "direct_fallback"
+            scored = [
+                score_match_with_evidence(
+                    candidate, job, None, embed_fn, similarities.get(job["id"])
                 )
                 for job in eligible_jobs
             ]
 
         results = []
-        for job, score, breakdown, reasons in scored_jobs:
+        for job, (score, breakdown, reasons, evidence) in zip(eligible_jobs, scored):
+            evidence["mode"] = mode
+            evidence["max_depth"] = 2 if mode == "graph" else 0
             match = {
                 "id": existing_matches.get(job["id"], {}).get("id", self._id()),
                 "candidate_id": candidate_id,
@@ -461,6 +475,7 @@ class AgentService:
                 "score": score,
                 "score_breakdown": breakdown,
                 "reasons": reasons,
+                "skill_graph_evidence": evidence,
                 "rule_version": RULE_VERSION,
                 "job_version": job["updated_at"],
                 "retrieval": retrieval_meta.get(job["id"], {"method": "full_scan"}),
