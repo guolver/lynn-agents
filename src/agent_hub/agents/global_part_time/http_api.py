@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
+from ...core.security import Principal, get_principal
 from .repository import RepositoryProtocol
 from .service import AgentService
 
@@ -725,9 +726,11 @@ class ChatMessageRequest(APIModel):
 
 
 @router.post("/chat/sessions", status_code=201)
-def create_chat_session(request: Request, actor: Actor) -> dict[str, Any]:
+def create_chat_session(
+    request: Request, principal: Principal = Depends(get_principal)
+) -> dict[str, Any]:
     chat_svc = request.app.state.chat_service
-    return chat_svc.create_session(actor=actor)
+    return chat_svc.create_session(actor=principal.actor_id)
 
 
 @router.get("/chat/sessions")
@@ -806,8 +809,9 @@ def upload_chat_resume(
     session_id: str,
     file: UploadFile,
     request: Request,
-    actor: Actor,
+    principal: Principal = Depends(get_principal),
 ):
+    actor = principal.actor_id
     chat_svc = request.app.state.chat_service
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
