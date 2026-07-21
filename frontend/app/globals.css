@@ -2154,7 +2154,11 @@ a {
   border: 2px solid rgba(251, 191, 36, 0.35);
   border-top-color: var(--amber);
   border-radius: 50%;
-  animation: jh-spin 0.8s linear infinite;
+  animation: auth-spin 0.8s linear infinite;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
 }
 
 .auth-footer {
