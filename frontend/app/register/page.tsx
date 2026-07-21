@@ -3,6 +3,16 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { AuthShell } from '../../components/auth-shell';
+import { AuthInput } from '../../components/auth-input';
+
+const ALERT_ICON = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="8" x2="12" y2="12" />
+    <line x1="12" y1="16" x2="12.01" y2="16" />
+  </svg>
+);
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -35,42 +45,49 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
-      <h1 className="mb-6 text-xl font-semibold">注册</h1>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm">
-          邮箱
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            className="rounded border border-gray-300 px-3 py-2"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          密码（至少 8 位）
-          <input
-            type="password"
-            required
-            minLength={8}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="rounded border border-gray-300 px-3 py-2"
-          />
-        </label>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
+    <AuthShell
+      subtitle="创建账号，开始使用 Agent Hub"
+      footer={
+        <>
+          已有账号？
+          <Link href="/login" className="auth-footer-link">
+            去登录
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="auth-form">
+        <AuthInput
+          label="邮箱"
+          variant="email"
+          value={email}
+          onChange={setEmail}
+          placeholder="邮箱"
+          required
+          autoComplete="email"
+        />
+        <AuthInput
+          label="密码"
+          variant="password"
+          value={password}
+          onChange={setPassword}
+          placeholder="密码"
+          required
+          minLength={8}
+          autoComplete="new-password"
+          hint="密码至少需要 8 位"
+        />
+        {error && (
+          <div className="auth-error" role="alert">
+            {ALERT_ICON}
+            <span>{error}</span>
+          </div>
+        )}
+        <button type="submit" disabled={submitting} className="auth-submit">
+          {submitting && <span className="auth-spinner" />}
           {submitting ? '注册中…' : '注册'}
         </button>
       </form>
-      <p className="mt-4 text-sm text-gray-600">
-        已有账号？<Link href="/login" className="underline">去登录</Link>
-      </p>
-    </div>
+    </AuthShell>
   );
 }

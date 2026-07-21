@@ -81,3 +81,21 @@ test("does not substitute demo data when the live job API is unavailable", async
     else process.env.AGENT_HUB_API_URL = previousApiUrl;
   }
 });
+
+test("server-renders the redesigned login page", async () => {
+  const response = await render("/login");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /登录以继续使用 Agent Hub/);
+  assert.match(html, /显示密码/);
+  assert.match(html, /去注册/);
+});
+
+test("server-renders the redesigned register page", async () => {
+  const response = await render("/register");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /创建账号，开始使用 Agent Hub/);
+  assert.match(html, /密码至少需要 8 位/);
+  assert.match(html, /去登录/);
+});
