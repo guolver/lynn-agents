@@ -76,6 +76,7 @@ export function AuthInput({
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
           className={`auth-input${isPassword ? ' auth-input-password' : ''}`}
+          aria-describedby={hint ? `${id}-hint` : undefined}
         />
         {isPassword && (
           <button
@@ -88,7 +89,11 @@ export function AuthInput({
           </button>
         )}
       </div>
-      {hint && <p className="auth-hint">{hint}</p>}
+      {hint && (
+        <p id={`${id}-hint`} className="auth-hint">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
