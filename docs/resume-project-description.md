@@ -13,6 +13,7 @@ Python · FastAPI · Next.js · PostgreSQL/pgvector · Neo4j · Redis · Celery 
 4. 基于 Neo4j 构建技能知识图谱，归一技能别名（K8s/Kubernetes）、按上下位类别扩展候选人技能，生成带依据的可解释推荐理由。
 5. 设计统一 Agent 注册与受控调用机制（动作白名单、参数校验、风险分级、幂等键、全程审计），并通过 MCP 协议将受控动作动态暴露给任意模型客户端，治理逻辑单点执行。
 6. 构建采集→去重→向量化→匹配→审批→通知的 Celery 流水线，落库规则版本、检索证据与评分明细，支持错误分类与指数退避重试。
+7. 落地多租户 RBAC 与资源归属校验：`IdentityMiddleware` 从网关头（`X-Actor`/`X-Tenant-Id`/`X-Roles`）解析身份并 HMAC 校验网关信任，service 层按租户过滤查询、越权访问资源返回 404 而非泄露存在性；修复了平台 Agent 动作调用入口曾绕过 REST 层 RBAC 的越权漏洞。
 
 ## 详细版（篇幅充裕时使用）
 
@@ -21,7 +22,8 @@ Python · FastAPI · Next.js · PostgreSQL/pgvector · Neo4j · Redis · Celery 
 3. 基于 DeepSeek function calling 开发求职对话 Agent：手写多轮工具调用循环（6 个白名单工具、简历 PDF 解析建档、流式 SSE 输出），用 Redis Streams 将回答生成与 HTTP 连接解耦，实现刷新/切页后断线续传，并处理历史窗口截断下的工具调用协议清洗；自建 30 用例 × 3 trials 的工具选择评测（与线上同提示词/同温度、零副作用可复现），依据评测暴露的失败模式迭代系统提示词，工具选择正确率 68.9% → 92.2%，参数正确率 100%。
 4. 构建招聘技能知识图谱（Neo4j），统一技能别名（如 K8s/Kubernetes）、维护技能上下位类别关系，匹配时自动扩展候选人相关技能，并生成带匹配依据（命中技能、语义相似度、检索排名）的可解释推荐理由。
 5. 设计统一 Agent 注册与工具调用机制，将职位检索、技能查询、匹配评分、审批和通知封装为受控动作，通过动作白名单、参数校验、风险分级和幂等键约束 Agent 执行范围，所有调用全程可审计；平台动作经 MCP server 动态发现并暴露为标准工具（默认只读、写动作显式开启且自动附幂等键），使 Claude 等任意 MCP 客户端可在同一治理边界内调用业务能力。
-6. 构建"职位采集（4 个数据源）—清洗去重—结构化抽取—向量化—匹配推荐—人工审批—通知发送"全链路 Celery 任务流水线，持久化每次匹配的规则版本、检索证据（召回方式/相似度/排名）、分项评分与操作人员，支持错误分类、指数退避重试与结果追溯。
+6. 构建"职位采集（7 个数据源）—清洗去重—结构化抽取—向量化—匹配推荐—人工审批—通知发送"全链路 Celery 任务流水线，持久化每次匹配的规则版本、检索证据（召回方式/相似度/排名）、分项评分与操作人员，支持错误分类、指数退避重试与结果追溯。
+7. 设计并落地多租户 RBAC 中间件：从网关请求头解析 `X-Actor`/`X-Tenant-Id`/`X-Roles` 身份并做 HMAC 网关信任校验，service 层查询按租户强制过滤、跨租户访问资源统一返回 404（不泄露资源存在性）；排查并修复了 Agent 平台统一调用入口曾绕过 REST 层权限校验、可越权读写他人候选人数据的安全缺口。
 
 ## 零基础解读（看不懂上面的术语时，从这里开始）
 
@@ -33,7 +35,7 @@ Python · FastAPI · Next.js · PostgreSQL/pgvector · Neo4j · Redis · Celery 
 
 打个比方，它像一个自动化的猎头团队：
 
-1. **收集职位**：从 4 个数据源抓取职位信息，清洗、去掉重复的。
+1. **收集职位**：从 7 个数据源抓取职位信息，清洗、去掉重复的。
 2. **理解职位和候选人**：把职位描述和候选人简历这样的"文字"，转换成机器能互相比较的"数字指纹"（这一步叫向量化 / embedding）。
 3. **海选（召回）**：从全部职位里快速挑出和候选人语义相关的最多 200 个——不求精确，只求别漏掉。
 4. **严格把关（精筛）**：地区不符、薪资低于期望、时区差太多、语言不通的，直接淘汰。这一步是确定性规则，没有任何"AI 猜测"。
@@ -150,7 +152,7 @@ Agent 指能自主调用工具完成任务的 AI 程序。核心风险：AI 的�
 ### 三条关键链路（追问时展开）
 
 1. **统一动作调用**：客户端 → `/platform/v1/agents/{id}/actions/{name}` → 注册表校验（Agent 存在？动作在白名单？写动作带幂等键？必填字段齐？）→ `Agent.invoke()` → service → domain + repository → 统一响应；全程 `request_id` 贯穿，审计落库。业务侧另保留 `/api/v1` 兼容 REST，两条入口共享同一个 service，结果一致。
-2. **匹配数据流**：Celery 采集（4 个数据源）→ 清洗去重 → 异步批量向量化（批 64）→ pgvector 余弦召回 top-200 → domain 硬过滤 → 8 维加权打分 + 可解释理由 → 通知草稿 → 人工审批 → 发送前重验 → 审计。
+2. **匹配数据流**：Celery 采集（7 个数据源）→ 清洗去重 → 异步批量向量化（批 64）→ pgvector 余弦召回 top-200 → domain 硬过滤 → 8 维加权打分 + 可解释理由 → 通知草稿 → 人工审批 → 发送前重验 → 审计。
 3. **LLM 对话链路**：前端 SSE ↔ FastAPI ↔ DeepSeek function calling；模型只能调用 `chat_tools` 里注册的工具（解析简历、跑匹配、查岗位等），工具内部走与 REST 完全相同的 service 层；消息（含 tool_calls/tool 配对）持久化，刷新后可回放重建。简历上传走确定性流水线（`run_analysis`：解析→建档→匹配），不依赖 LLM 决定是否调工具。
 
 ### 架构决策的讲法（为什么是这个架构）
@@ -322,3 +324,4 @@ Docker 构建在代理网络环境下反复失败：容器内直连 PyPI/镜像�
 | Agent 工具选择评测 | `scripts/eval_agent_tools.py` + `docs/agent-tool-eval-report.md`（提示词迭代 68.9%→92.2%，可复现） |
 | LLM 可观测性（Langfuse） | `src/agent_hub/observability.py` + `docs/observability.md`（每轮调用/工具/token 用量追踪，no-op 降级） |
 | 系统架构与分层 | 本文档"系统架构"节；组装入口 `src/agent_hub/app.py`（create_app 显式装配）；平台核心 `src/agent_hub/core/`；详细版 `docs/system-architecture.md` |
+| 多租户 RBAC / 资源归属 | `src/agent_hub/core/security.py`（IdentityMiddleware、Principal、require_roles）；service 层归属校验（`_owned_candidate`/`_owned_session` 等）；越权修复见提交 `de8bd8f`、`1bc04ff` |

@@ -6,6 +6,7 @@ Pure functions only — no dependency on service, repository, or framework.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 
@@ -15,6 +16,27 @@ from . import _SSL_CONTEXT, normalize_countries, sanitize_html, strip_html
 __all__ = ["strip_html", "map_job", "fetch"]
 
 HOURS_PER_WORK_YEAR = 2080
+
+# RemoteOK appends this standard anti-spam "apply word" notice to postings
+# regardless of source quality, so its presence alone isn't a signal. But some
+# listings (typically ones gated behind RemoteOK's paid tier) have nothing
+# else — no real responsibilities/requirements, just a templated
+# title/location/type header plus this notice. Those are unusable and are
+# dropped in fetch() rather than stored as hollow job listings.
+_APPLY_WORD_BOILERPLATE_RE = re.compile(
+    r"please mention the word.*?"
+    r"companies can search these words to find applicants that read this and see (they.?re|they are) human\.?",
+    re.IGNORECASE | re.DOTALL,
+)
+MIN_REAL_DESCRIPTION_LENGTH = 200
+
+
+def _is_gated_stub(description: str) -> bool:
+    text = strip_html(description or "")
+    if not _APPLY_WORD_BOILERPLATE_RE.search(text):
+        return False
+    remainder = _APPLY_WORD_BOILERPLATE_RE.sub("", text).strip()
+    return len(remainder) < MIN_REAL_DESCRIPTION_LENGTH
 
 
 def map_job(raw: dict) -> dict:
@@ -79,4 +101,5 @@ def fetch(tags: list[str] | None = None, limit: int = 200) -> list[dict]:
         data = json.loads(response.read())
     # First element is always metadata (legal notice, timestamp, etc.)
     jobs = data[1:] if len(data) > 1 else []
+    jobs = [job for job in jobs if not _is_gated_stub(job.get("description", ""))]
     return jobs[:limit]

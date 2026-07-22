@@ -21,10 +21,15 @@ type TokenResponse = {
   expires_in: number;
 };
 
-async function fetchWithToken(path: string, init: RequestInit, accessToken: string): Promise<Response> {
+async function fetchWithToken(
+  path: string,
+  init: RequestInit,
+  accessToken: string,
+  timeoutMs: number,
+): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${accessToken}`);
-  return fetch(`${API_URL}${path}`, { ...init, headers, signal: AbortSignal.timeout(10000) });
+  return fetch(`${API_URL}${path}`, { ...init, headers, signal: AbortSignal.timeout(timeoutMs) });
 }
 
 async function refreshTokens(refreshToken: string): Promise<TokenResponse | null> {
@@ -52,12 +57,12 @@ async function refreshTokens(refreshToken: string): Promise<TokenResponse | null
  * session or refresh fails (and clears both cookies in that case) —
  * callers should catch this and return a 401 to the browser.
  */
-export async function callAgentHub(path: string, init: RequestInit = {}): Promise<Response> {
+export async function callAgentHub(path: string, init: RequestInit = {}, timeoutMs = 10000): Promise<Response> {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
 
   if (accessToken) {
-    const first = await fetchWithToken(path, init, accessToken);
+    const first = await fetchWithToken(path, init, accessToken, timeoutMs);
     if (first.status !== 401) return first;
   }
 
@@ -78,5 +83,24 @@ export async function callAgentHub(path: string, init: RequestInit = {}): Promis
   cookieStore.set(ACCESS_TOKEN_COOKIE, refreshed.access_token, accessTokenCookieOptions(refreshed.expires_in));
   cookieStore.set(REFRESH_TOKEN_COOKIE, refreshed.refresh_token, refreshTokenCookieOptions());
 
-  return fetchWithToken(path, init, refreshed.access_token);
+  return fetchWithToken(path, init, refreshed.access_token, timeoutMs);
+}
+
+/**
+ * Extracts the `sub` claim from the access token cookie for the `X-Actor`
+ * header some backend write routes require for audit attribution. Only
+ * decodes the JWT payload (no signature check) — the backend has already
+ * verified the token via the Bearer header; this is just a label.
+ */
+export async function getActorId(): Promise<string> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
+  if (!accessToken) return 'console-ui';
+  try {
+    const payload = accessToken.split('.')[1];
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+    return typeof decoded.sub === 'string' ? decoded.sub : 'console-ui';
+  } catch {
+    return 'console-ui';
+  }
 }

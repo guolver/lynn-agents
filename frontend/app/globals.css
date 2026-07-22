@@ -2178,3 +2178,319 @@ a {
 .auth-footer-link:hover {
   color: #78350f;
 }
+
+/* ── Sources management page ── */
+.src-layout {
+  padding: 24px 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.src-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.src-add-btn {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--amber);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.src-add-btn:hover {
+  opacity: 0.9;
+}
+
+.src-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.src-subtitle {
+  font-size: 13px;
+  color: var(--ink-mid);
+  margin: 0;
+}
+
+.src-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 160px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.src-table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-x: auto;
+  box-shadow: var(--shadow);
+}
+
+.src-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.src-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-alt);
+  white-space: nowrap;
+}
+
+.src-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  vertical-align: middle;
+}
+
+.src-table tr:last-child td {
+  border-bottom: none;
+}
+
+.src-url {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-mid);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.src-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-alt);
+  color: var(--ink-mid);
+}
+
+.src-badge-approved {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.src-badge-pending {
+  background: var(--amber-soft);
+  color: var(--amber-deep);
+}
+
+.src-badge-rejected {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.src-import-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.src-import-btn:hover:not(:disabled) {
+  background: var(--amber-soft);
+  border-color: var(--amber);
+  color: var(--amber-deep);
+}
+
+.src-import-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.src-result {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--ink-mid);
+}
+
+.src-result-error {
+  color: var(--red);
+}
+
+.src-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 15, 15, 0.45);
+}
+
+.src-modal {
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
+.src-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 0;
+}
+
+.src-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.src-modal-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.src-modal-close:hover {
+  background: var(--bg-alt);
+  color: var(--ink);
+}
+
+.src-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px 20px;
+}
+
+.src-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.src-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.src-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-mid);
+}
+
+.src-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.src-input:focus {
+  outline: none;
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-soft);
+}
+
+.src-form-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 13px;
+}
+
+.src-form-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.src-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.src-cancel-btn,
+.src-submit-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.src-cancel-btn {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.src-cancel-btn:hover:not(:disabled) {
+  background: var(--bg-alt);
+}
+
+.src-submit-btn {
+  border: none;
+  background: var(--ink);
+  color: var(--amber);
+}
+
+.src-submit-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.src-cancel-btn:disabled,
+.src-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

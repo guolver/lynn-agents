@@ -2,6 +2,10 @@
 
 可扩展的 Agent 平台底座，提供统一的 Agent 注册、发现、调用和审计能力。
 
+## 助手行为约定
+
+不要使用 superpowers 相关 skills（如 brainstorming、TDD、systematic-debugging 等）。
+
 ## 架构概览
 
 ```

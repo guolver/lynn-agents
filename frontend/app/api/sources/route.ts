@@ -1,9 +1,9 @@
-import { callAgentHub, UnauthenticatedError } from '../../../../../lib/agent-hub-authed-fetch';
+import { NextRequest } from 'next/server';
+import { callAgentHub, getActorId, UnauthenticatedError } from '../../../lib/agent-hub-authed-fetch';
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export async function GET() {
   try {
-    const response = await callAgentHub(`/api/v1/chat/sessions/${id}`, {}, 5000);
+    const response = await callAgentHub('/api/v1/sources');
     return new Response(await response.text(), {
       status: response.status,
       headers: { 'Content-Type': 'application/json' },
@@ -16,10 +16,19 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
 }
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export async function POST(request: NextRequest) {
   try {
-    const response = await callAgentHub(`/api/v1/chat/sessions/${id}`, { method: 'DELETE' }, 5000);
+    const actor = await getActorId();
+    const body = await request.text();
+    const response = await callAgentHub('/api/v1/sources', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Actor': actor,
+        'Idempotency-Key': crypto.randomUUID(),
+      },
+      body,
+    });
     return new Response(await response.text(), {
       status: response.status,
       headers: { 'Content-Type': 'application/json' },

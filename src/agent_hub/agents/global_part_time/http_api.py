@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 from ...core.security import Principal, Role, get_principal, require_roles
 from .chat_service import ChatService
 from .repository import RepositoryProtocol, TenantRepositoryProtocol
-from .service import AgentService
+from .service import AgentService, NotFoundError, PolicyError
 
 
 class APIModel(BaseModel):
@@ -320,6 +320,43 @@ def sync_source(
         key,
         lambda: service.sync_source(source_id, jobs, actor),
     )
+
+
+@router.post("/sources/{source_id}/import")
+def import_source(
+    source_id: str,
+    key: IdempotencyKey,
+    actor: Actor,
+    repository: RepositoryDep,
+    service: ServiceDep,
+    _principal: Principal = require_roles(Role.OPERATOR, Role.ADMIN),
+) -> dict[str, Any]:
+    """Fetch jobs directly from a source's own site/feed and sync them in.
+
+    Unlike ``/sync`` (which takes caller-supplied ``jobs``), this pulls the
+    data itself via the fetcher registered for the source's ``base_url`` —
+    the same fetch step ``periodic_sync_all_task`` runs on a schedule, just
+    triggerable on demand from the console. Always runs inline (unlike
+    ``/sync``, it never dispatches to Celery) so the console gets the
+    imported/duplicate/rejected counts back immediately instead of a task id
+    that requires a worker to ever resolve. Dedup/risk filtering happens
+    inside ``service.sync_source`` exactly as it does for scheduled syncs.
+    """
+    from .fetchers import get_fetcher
+
+    def _fetch_and_sync() -> dict[str, Any]:
+        source = repository.get("source", source_id)
+        if source is None:
+            raise NotFoundError(f"source {source_id} not found")
+        fetcher = get_fetcher(source.get("base_url", ""))
+        if fetcher is None:
+            raise PolicyError(f"no fetcher registered for base_url {source.get('base_url')!r}")
+        fetch_fn, map_fn = fetcher
+        raw_jobs = fetch_fn()
+        mapped = [map_fn(raw) for raw in raw_jobs]
+        return service.sync_source(source_id, mapped, actor)
+
+    return once(repository, f"source.import:{source_id}", key, _fetch_and_sync)
 
 
 @router.get("/candidates")

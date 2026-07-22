@@ -417,10 +417,18 @@ export function ChatPanel({
     const maxAttempts = 120; // ~6 min, matches the backend Celery time limit
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise((r) => setTimeout(r, intervalMs));
-      let data: { status?: string; result?: AnalysisResult; error?: string } | null = null;
+      let data: { status?: string; result?: AnalysisResult; error?: string; detail?: string } | null = null;
       try {
         const r = await fetch(`/api/chat/tasks/${taskId}`);
         data = await r.json();
+        if (r.status === 401) {
+          setAssistantText(assistantId, '登录已过期，请重新登录后再上传简历。');
+          return;
+        }
+        if (!r.ok) {
+          setAssistantText(assistantId, data?.detail ?? `查询分析进度失败 (${r.status})`);
+          return;
+        }
       } catch {
         continue; // transient network error — keep polling
       }

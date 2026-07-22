@@ -219,6 +219,90 @@ class FetchTest(unittest.TestCase):
         self.assertIn("tag=react", request.full_url)
 
 
+GATED_STUB_DESCRIPTION = (
+    "Administrative Assistant (Remote)\nLocation: Lebanon – Fully Remote\n"
+    "Employment Type: Full-Time<br></br><br></br>"
+    "Please mention the word **FEARLESS** and tag "
+    "RMjYwMjpmZWRhOmYzOWY6ODI1NDpiOWRjOmNlZDU6OWY5MjoyZDRk when applying to show "
+    "you read the job post completely "
+    "(#RMjYwMjpmZWRhOmYzOWY6ODI1NDpiOWRjOmNlZDU6OWY5MjoyZDRk). "
+    "This is a beta feature to avoid spam applicants. "
+    "Companies can search these words to find applicants that read this and see they're human."
+)
+
+
+class FetchGatedStubTest(unittest.TestCase):
+    @patch("agent_hub.agents.global_part_time.fetchers.remoteok.urlopen")
+    def test_drops_gated_stub_listing(self, mock_urlopen_fn):
+        response = json.dumps(
+            [
+                METADATA,
+                {
+                    "id": "111",
+                    "slug": "job-1",
+                    "company": "Alpha",
+                    "position": "Dev",
+                    "description": "desc",
+                    "location": "Worldwide",
+                    "tags": ["python"],
+                    "salary_min": 0,
+                    "salary_max": 0,
+                    "url": "https://remoteok.com/remote-jobs/111",
+                    "apply_url": "",
+                    "epoch": 1752700800,
+                },
+                {
+                    "id": "1134930",
+                    "slug": "remote-administrative-assistant-azurreo-1134930",
+                    "company": "Azurreo",
+                    "position": "Administrative Assistant",
+                    "description": GATED_STUB_DESCRIPTION,
+                    "location": "Lebanon",
+                    "tags": ["virtual assistant", "full time"],
+                    "salary_min": 0,
+                    "salary_max": 0,
+                    "url": "https://remoteok.com/remote-jobs/remote-administrative-assistant-azurreo-1134930",
+                    "apply_url": "",
+                    "epoch": 1752700800,
+                },
+            ]
+        ).encode()
+        mock_urlopen_fn.return_value = _mock_urlopen(response)
+        jobs = fetch()
+        self.assertEqual([job["id"] for job in jobs], ["111"])
+
+    @patch("agent_hub.agents.global_part_time.fetchers.remoteok.urlopen")
+    def test_keeps_listing_with_boilerplate_plus_real_content(self, mock_urlopen_fn):
+        real_description = (
+            "About the role: you will manage inbox triage, calendar scheduling, "
+            "vendor coordination, and light bookkeeping for a small remote team. "
+            "We're looking for someone detail-oriented with 2+ years of admin "
+            "experience and strong written English.\n\n" + GATED_STUB_DESCRIPTION
+        )
+        response = json.dumps(
+            [
+                METADATA,
+                {
+                    "id": "999",
+                    "slug": "job-with-real-content",
+                    "company": "Acme",
+                    "position": "Admin",
+                    "description": real_description,
+                    "location": "Worldwide",
+                    "tags": ["admin"],
+                    "salary_min": 0,
+                    "salary_max": 0,
+                    "url": "https://remoteok.com/remote-jobs/999",
+                    "apply_url": "",
+                    "epoch": 1752700800,
+                },
+            ]
+        ).encode()
+        mock_urlopen_fn.return_value = _mock_urlopen(response)
+        jobs = fetch()
+        self.assertEqual([job["id"] for job in jobs], ["999"])
+
+
 REMOTEOK_SOURCE = {
     "name": "RemoteOK Public API",
     "source_type": "api",

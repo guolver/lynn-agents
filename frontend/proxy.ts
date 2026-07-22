@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ACCESS_TOKEN_COOKIE } from './lib/auth-cookies';
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get(ACCESS_TOKEN_COOKIE)?.value);
   if (hasSession) return NextResponse.next();
 

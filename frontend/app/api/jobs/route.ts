@@ -1,18 +1,20 @@
 import { NextRequest } from 'next/server';
-
-const API_URL = process.env.AGENT_HUB_API_URL ?? 'http://127.0.0.1:8000';
+import { callAgentHub, UnauthenticatedError } from '../../../lib/agent-hub-authed-fetch';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const qs = searchParams.toString();
-  const url = `${API_URL}/api/v1/jobs${qs ? `?${qs}` : ''}`;
+  const path = `/api/v1/jobs${qs ? `?${qs}` : ''}`;
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const response = await callAgentHub(path);
     return new Response(await response.text(), {
       status: response.status,
       headers: { 'Content-Type': 'application/json' },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return Response.json({ detail: '未登录' }, { status: 401 });
+    }
     return Response.json({ detail: 'API 不可用' }, { status: 503 });
   }
 }

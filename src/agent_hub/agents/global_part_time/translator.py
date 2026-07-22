@@ -10,9 +10,13 @@ import json
 import logging
 import os
 
+import httpx
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
+
+# DeepSeek API 超时配置（秒）
+DEEPSEEK_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 
 SYSTEM_PROMPT = """\
 你是一个专业的岗位信息翻译器。请将以下英文岗位信息翻译为中文。
@@ -41,7 +45,7 @@ def translate_job(title: str, description_html: str) -> dict[str, str]:
     if not api_key:
         raise ValueError("DEEPSEEK_API_KEY environment variable is not set")
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=DEEPSEEK_TIMEOUT)
 
     user_content = f"标题：{title}\n\n描述：\n{description_html}"
 

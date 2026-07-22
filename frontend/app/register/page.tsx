@@ -18,12 +18,17 @@ export default function RegisterPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    if (password !== confirmPassword) {
+      setError('两次输入的密码不一致');
+      return;
+    }
     setSubmitting(true);
     try {
       const response = await fetch('/api/auth/register', {
@@ -76,6 +81,16 @@ export default function RegisterPage() {
           minLength={8}
           autoComplete="new-password"
           hint="密码至少需要 8 位"
+        />
+        <AuthInput
+          label="确认密码"
+          variant="password"
+          value={confirmPassword}
+          onChange={setConfirmPassword}
+          placeholder="再次输入密码"
+          required
+          minLength={8}
+          autoComplete="new-password"
         />
         {error && (
           <div className="auth-error" role="alert">

@@ -25,6 +25,9 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
           <Link className={`topbar-link${pathname.startsWith('/jobs') ? ' active' : ''}`} href="/jobs">
             岗位大厅
           </Link>
+          <Link className={`topbar-link${pathname.startsWith('/sources') ? ' active' : ''}`} href="/sources">
+            数据来源
+          </Link>
         </div>
         <div className="topbar-right">
           <span className="topbar-avatar" title="User">U</span>

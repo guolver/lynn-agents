@@ -13,10 +13,15 @@ import uuid
 from collections.abc import Generator
 from typing import Any
 
+import httpx
+
 from ...core.security import Principal, Role
 from ...observability import get_chat_tracer
 from .chat_tools import TOOL_DEFINITIONS, execute_tool
 from .service import AgentService, NotFoundError
+
+# DeepSeek API 超时配置（流式响应需要更长的读取超时）
+DEEPSEEK_STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
 
 logger = logging.getLogger(__name__)
 
@@ -428,7 +433,7 @@ class ChatService:
 
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key, base_url=base_url)
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=DEEPSEEK_STREAM_TIMEOUT)
         actor = session.get("actor", "chat-user")
 
         # 观测：一次用户消息 = 一条 trace；no-op tracer 时以下埋点零开销。

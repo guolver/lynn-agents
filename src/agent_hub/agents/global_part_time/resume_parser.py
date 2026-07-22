@@ -9,10 +9,23 @@ import json
 import logging
 import os
 
+import httpx
 from pypdf import PdfReader
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
+
+# DeepSeek API 超时配置（秒）
+# - connect: 建立连接的超时
+# - read: 等待响应的超时（LLM 生成需要较长时间）
+# - write: 发送请求的超时
+# - pool: 连接池获取连接的超时
+DEEPSEEK_TIMEOUT = httpx.Timeout(
+    connect=10.0,
+    read=90.0,
+    write=10.0,
+    pool=10.0,
+)
 
 SYSTEM_PROMPT = """\
 你是一个简历解析器。请从以下简历文本中提取结构化信息，返回 JSON 对象，字段如下：
@@ -50,8 +63,9 @@ def parse_resume(text: str) -> dict:
     if not api_key:
         raise ValueError("DEEPSEEK_API_KEY environment variable is not set")
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=DEEPSEEK_TIMEOUT)
 
+    logger.info("Calling DeepSeek API for resume parsing (timeout: 90s read)")
     response = client.chat.completions.create(
         model=model,
         messages=[
