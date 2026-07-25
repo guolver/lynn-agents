@@ -13,9 +13,35 @@ The project includes an auto-fix workflow that uses Claude to automatically fix 
    - Create token with `repo` permissions
    - Add to repo secrets as `PAT_TOKEN`
 
-2. **ANTHROPIC_API_KEY**: Claude API key
-   - Get from https://console.anthropic.com/
-   - Add to repo secrets as `ANTHROPIC_API_KEY`
+2. **LLM API Key** (任选一个):
+   - `DEEPSEEK_API_KEY` - DeepSeek API (默认，便宜)
+   - `OPENAI_API_KEY` - OpenAI API
+   - `ANTHROPIC_API_KEY` - Anthropic Claude API
+
+### Optional Variables
+
+在 Settings → Secrets and variables → Actions → Variables 中配置：
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_BASE_URL` | `https://api.deepseek.com` | API 地址 |
+| `LLM_MODEL` | `deepseek-chat` | 模型名称 |
+
+**常用配置：**
+
+```bash
+# DeepSeek (默认)
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
+
+# OpenAI
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o
+
+# 本地 Ollama
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=qwen2.5-coder:14b
+```
 
 ### How It Works
 
