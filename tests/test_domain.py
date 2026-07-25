@@ -156,7 +156,7 @@ class SkillScoreExpansionTest(unittest.TestCase):
     def test_skill_score_without_expand_fn_is_backward_compatible(self):
         candidate = {"skills": [{"name": "Python"}, {"name": "React"}]}
         job = {"skills": ["Python", "React"]}
-        score, breakdown, reasons = score_match(candidate, job)
+        _, breakdown, _ = score_match(candidate, job)
         self.assertEqual(breakdown["skills"], 1.0)
 
     def test_skill_score_with_expand_fn_boosts_indirect_matches(self):
@@ -170,7 +170,7 @@ class SkillScoreExpansionTest(unittest.TestCase):
                 result.update(mapping.get(n, set()))
             return result
 
-        score, breakdown, reasons = score_match(candidate, job, expand_fn=mock_expand)
+        _, breakdown, _ = score_match(candidate, job, expand_fn=mock_expand)
         self.assertGreater(breakdown["skills"], 0.0)
         self.assertLessEqual(breakdown["skills"], 0.6)
 
@@ -181,7 +181,7 @@ class SkillScoreExpansionTest(unittest.TestCase):
         def mock_expand(names):
             return {"Python", "React", "前端开发", "后端开发"}
 
-        score, breakdown, reasons = score_match(candidate, job, expand_fn=mock_expand)
+        _, breakdown, _ = score_match(candidate, job, expand_fn=mock_expand)
         # Python direct (1.0) + 前端开发 indirect (0.6) → (1.0 + 0.6) / 2 = 0.8
         self.assertAlmostEqual(breakdown["skills"], 0.8, places=2)
 
@@ -239,7 +239,7 @@ class SkillScoreExpansionTest(unittest.TestCase):
         def mock_expand(names):
             return {"React", "前端开发"}
 
-        score, breakdown, reasons = score_match(candidate, job, expand_fn=mock_expand)
+        _, _, reasons = score_match(candidate, job, expand_fn=mock_expand)
         has_expansion_reason = any("扩展" in r or "相关" in r for r in reasons)
         self.assertTrue(has_expansion_reason, f"Expected expansion reason in {reasons}")
 
@@ -495,7 +495,7 @@ class WeightedSkillEvidenceTest(unittest.TestCase):
         for label, path, expected in cases:
             with self.subTest(label=label):
 
-                def expand(names):
+                def expand(names, path=path):
                     values = [evidence(name, name, [], [name], 1.0) for name in names]
                     if names == [path.input_skill]:
                         values.append(path)

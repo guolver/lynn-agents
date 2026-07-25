@@ -6,11 +6,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from eval_recall import keyword_rank, mrr, recall_at_k  # noqa: E402
+from eval_recall import keyword_rank, mrr, recall_at_k
 
 
 class KeywordRankTest(unittest.TestCase):
-    JOBS = [
+    JOBS: ClassVar = [
         {
             "id": "j1",
             "title_original": "Python Backend",
@@ -86,7 +86,7 @@ class ParaphrasePurityTest(unittest.TestCase):
 
 
 class AggregateRenderTest(unittest.TestCase):
-    ROWS = [
+    ROWS: ClassVar = [
         {
             "id": "c1",
             "paraphrase": True,
