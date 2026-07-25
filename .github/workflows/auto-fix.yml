@@ -30,12 +30,14 @@ jobs:
       - name: Check retry count
         id: retry
         run: |
-          count=$(git log -3 --oneline --grep="auto-fix" | wc -l)
+          # Only count commits from AI Auto-Fix bot (not human commits mentioning auto-fix)
+          count=$(git log -5 --oneline --author="AI Auto-Fix" | wc -l)
           echo "count=$count" >> $GITHUB_OUTPUT
           if [ "$count" -ge 2 ]; then
             echo "::warning::Too many auto-fix attempts (${count}), stopping"
             exit 1
           fi
+          echo "Auto-fix attempts so far: $count"
 
       - name: Setup Python
         uses: actions/setup-python@v5
