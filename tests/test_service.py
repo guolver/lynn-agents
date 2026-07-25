@@ -2,10 +2,10 @@ import unittest
 from unittest.mock import patch
 
 from agent_hub.agents.global_part_time.domain import score_match_with_evidence
-from tests.inmemory_repo import InMemoryRepository as Repository
 from agent_hub.agents.global_part_time.service import AgentService, PolicyError
 from agent_hub.skill_graph.types import ExpansionEvidence, ExpansionResult
 from tests.factories import candidate_payload, job_payload, source_payload
+from tests.inmemory_repo import InMemoryRepository as Repository
 
 
 class ServiceWorkflowTest(unittest.TestCase):
@@ -426,7 +426,7 @@ class ServiceWorkflowTest(unittest.TestCase):
                 jobs_by_id = {job["id"]: job for job in repo.list("job")}
                 original_list = repo.list
 
-                def list_in_order(kind):
+                def list_in_order(kind, jobs_by_id=jobs_by_id, ordered_ids=ordered_ids):
                     if kind == "job":
                         return [jobs_by_id[job_id] for job_id in ordered_ids]
                     return original_list(kind)

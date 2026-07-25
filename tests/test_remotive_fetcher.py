@@ -5,8 +5,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from agent_hub.agents.global_part_time.fetchers.remotive import fetch, map_job, parse_salary
-from tests.inmemory_repo import InMemoryRepository as Repository
 from agent_hub.agents.global_part_time.service import AgentService
+from tests.inmemory_repo import InMemoryRepository as Repository
 
 
 class ParseSalaryTest(unittest.TestCase):
@@ -17,12 +17,12 @@ class ParseSalaryTest(unittest.TestCase):
         self.assertEqual(period, "hour")
 
     def test_annual_range(self):
-        min_val, max_val, period = parse_salary("$150,000 - $230,000")
+        min_val, max_val, _ = parse_salary("$150,000 - $230,000")
         self.assertAlmostEqual(min_val, 72.12, places=2)
         self.assertAlmostEqual(max_val, 110.58, places=2)
 
     def test_annual_k_suffix(self):
-        min_val, max_val, period = parse_salary("$150k - $230k")
+        min_val, max_val, _ = parse_salary("$150k - $230k")
         self.assertAlmostEqual(min_val, 72.12, places=2)
         self.assertAlmostEqual(max_val, 110.58, places=2)
 

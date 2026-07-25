@@ -17,9 +17,9 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 @unittest.skipUnless(TEST_DATABASE_URL, "TEST_DATABASE_URL not set")
 class PostgresWorkflowTest(unittest.TestCase):
     def setUp(self) -> None:
+        from agent_hub.agents.global_part_time.service import AgentService
         from agent_hub.database.models import Base
         from agent_hub.database.repository import PostgresRepository
-        from agent_hub.agents.global_part_time.service import AgentService
 
         self.repo = PostgresRepository(TEST_DATABASE_URL)
 
