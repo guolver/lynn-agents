@@ -101,3 +101,5 @@ POST /platform/v1/agents/{agent_id}/actions/{name} # 调用动作
 - [MCP Server](docs/mcp-server.md)
 - [LLM 可观测性](docs/observability.md)
 - [开发环境搭建](docs/dev-guide.md)
+- [云端部署方案](docs/cloud-deployment.md)
+- [市场推广策略](docs/go-to-market.md)

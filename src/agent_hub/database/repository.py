@@ -26,6 +26,9 @@ from agent_hub.database.models import (
     ChatSession,
     Feedback,
     IdempotencyRecord,
+    InterviewKnowledge,
+    InterviewMessage,
+    InterviewSession,
     Job,
     JobSource,
     Match,
@@ -50,6 +53,9 @@ _KIND_MAP: dict[str, type[Base]] = {
     "feedback": Feedback,
     "chat_session": ChatSession,
     "chat_message": ChatMessage,
+    "interview_knowledge": InterviewKnowledge,
+    "interview_session": InterviewSession,
+    "interview_message": InterviewMessage,
 }
 
 # Typed columns to populate from payload for each kind.
@@ -112,6 +118,27 @@ _TYPED_COLUMNS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
         "tool_calls": p.get("tool_calls"),
         "tool_call_id": p.get("tool_call_id"),
         "attachment": p.get("attachment"),
+    },
+    "interview_knowledge": lambda p: {
+        "category": p.get("category", ""),
+        "title": p.get("title", ""),
+        "content": p.get("content", ""),
+        "source_file": p.get("source_file"),
+        "source_format": p.get("source_format", "markdown"),
+        "metadata": p.get("metadata", {}),
+    },
+    "interview_session": lambda p: {
+        "actor": p.get("actor", "anonymous"),
+        "target_role": p.get("target_role", ""),
+        "difficulty": p.get("difficulty", "medium"),
+        "status": p.get("status", "in_progress"),
+        "summary": p.get("summary"),
+    },
+    "interview_message": lambda p: {
+        "session_id": p.get("session_id", ""),
+        "role": p.get("role", "user"),
+        "content": p.get("content", ""),
+        "evaluation": p.get("evaluation"),
     },
 }
 

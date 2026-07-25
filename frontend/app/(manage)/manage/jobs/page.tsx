@@ -1,5 +1,5 @@
 import { JobsContent } from '@/components/jobs-content';
 
-export default function JobsPage() {
+export default function ManageJobsPage() {
   return <JobsContent />;
 }

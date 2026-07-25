@@ -179,7 +179,8 @@ def get_principal(request: Request) -> Principal:
 
 def require_roles(*allowed: Role):
     def dependency(principal: Principal = Depends(get_principal)) -> Principal:
-        if not principal.roles.intersection(allowed):
+        # 如果未指定角色，允许任意已认证用户
+        if allowed and not principal.roles.intersection(allowed):
             raise HTTPException(status_code=403, detail="insufficient role")
         return principal
 

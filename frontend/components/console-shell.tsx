@@ -11,7 +11,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <header className="app-topbar">
         <div className="topbar-left">
-          <Link className="app-brand" href="/chat">
+          <Link className="app-brand" href="/">
             <span className="app-brand-mark">AH</span>
             <span className="app-brand-name">Agent Hub</span>
           </Link>
@@ -19,14 +19,14 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
           <Link className={`topbar-link${pathname.startsWith('/chat') ? ' active' : ''}`} href="/chat">
             AI 助手
           </Link>
-          <Link className={`topbar-link${pathname.startsWith('/agents') ? ' active' : ''}`} href="/agents">
-            Agent 目录
-          </Link>
           <Link className={`topbar-link${pathname.startsWith('/jobs') ? ' active' : ''}`} href="/jobs">
             岗位大厅
           </Link>
           <Link className={`topbar-link${pathname.startsWith('/sources') ? ' active' : ''}`} href="/sources">
             数据来源
+          </Link>
+          <Link className={`topbar-link${pathname.startsWith('/interview') ? ' active' : ''}`} href="/interview">
+            模拟面试
           </Link>
         </div>
         <div className="topbar-right">

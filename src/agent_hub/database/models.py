@@ -600,3 +600,79 @@ class RefreshToken(Base):
         UniqueConstraint("token_hash", name="uq_refresh_tokens_token_hash"),
         Index("ix_refresh_tokens_user_id", "user_id"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Interview (Mock Interview Agent)
+# ---------------------------------------------------------------------------
+
+
+class InterviewKnowledge(Base):
+    """面试知识库文档"""
+
+    __tablename__ = "interview_knowledge"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_format: Mapped[str] = mapped_column(String(20), nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_interview_knowledge_tenant_id", "tenant_id"),
+        Index("ix_interview_knowledge_category", "category"),
+    )
+
+
+class InterviewSession(Base):
+    """面试会话"""
+
+    __tablename__ = "interview_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False, default="default")
+    actor: Mapped[str] = mapped_column(String(255), nullable=False, default="anonymous")
+    target_role: Mapped[str] = mapped_column(String(100), nullable=False)
+    difficulty: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="in_progress")
+    summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_interview_sessions_tenant_id", "tenant_id"),
+        Index("ix_interview_sessions_status", "status"),
+    )
+
+
+class InterviewMessage(Base):
+    """面试消息"""
+
+    __tablename__ = "interview_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("interview_sessions.id"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    evaluation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    __table_args__ = (Index("ix_interview_messages_session_id", "session_id"),)
