@@ -10,6 +10,8 @@ import re
 from threading import RLock
 from typing import Any
 
+from jsonschema import Draft7Validator
+
 from .contracts import (
     ActionDefinition,
     ActionNotFoundError,
@@ -84,7 +86,7 @@ class AgentRegistry:
             raise AuthorizationError(f"action {action_name} is not allowed for this principal")
         if action.requires_idempotency_key and not context.idempotency_key:
             raise InvalidInvocationError(f"action {action_name} requires an Idempotency-Key header")
-        self._validate_required_fields(action, payload)
+        self._validate_payload(action, payload)
         # Registry 只允许 manifest 中声明的动作，避免把 Agent 变成任意代码执行入口。
         return agent.invoke(action_name, payload, context)
 
@@ -96,15 +98,37 @@ class AgentRegistry:
         raise ActionNotFoundError(f"action {action_name} is not exposed by this agent")
 
     @staticmethod
-    def _validate_required_fields(action: ActionDefinition, payload: dict[str, Any]) -> None:
-        """执行平台能可靠完成的最小 Schema 校验。
+    def _validate_payload(action: ActionDefinition, payload: dict[str, Any]) -> None:
+        """执行 JSON Schema 校验。
 
-        完整类型和业务约束仍由 Agent 负责；平台只统一处理 manifest 中的
-        ``required`` 字段，确保缺参不会变成内部 500 错误。
+        向后兼容：仅有 ``required`` 字段的 schema 使用旧逻辑（快速路径）。
+        若 schema 包含 ``type``、``properties`` 等字段，则使用完整的 Draft7 验证。
         """
-        required = action.input_schema.get("required", [])
-        missing = [field for field in required if payload.get(field) is None]
-        if missing:
-            raise InvalidInvocationError(
-                f"missing required payload fields: {', '.join(sorted(missing))}"
-            )
+        schema = action.input_schema
+        if not schema:
+            return
+
+        # 快速路径：仅有 required 字段时使用简单检查
+        schema_keys = set(schema.keys())
+        if schema_keys <= {"required"}:
+            required = schema.get("required", [])
+            missing = [field for field in required if payload.get(field) is None]
+            if missing:
+                raise InvalidInvocationError(
+                    f"missing required payload fields: {', '.join(sorted(missing))}"
+                )
+            return
+
+        # 完整 JSON Schema 验证
+        validator = Draft7Validator(schema)
+        errors = list(validator.iter_errors(payload))
+        if errors:
+            # 收集所有错误信息
+            error_messages = []
+            for error in errors:
+                path = ".".join(str(p) for p in error.absolute_path) if error.absolute_path else ""
+                if path:
+                    error_messages.append(f"{path}: {error.message}")
+                else:
+                    error_messages.append(error.message)
+            raise InvalidInvocationError(f"payload validation failed: {'; '.join(error_messages)}")

@@ -10,10 +10,13 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .agents.global_part_time import http_api
 from .agents.global_part_time.agent import GlobalPartTimeAgent
+from .agents.mock_interview import http_api as interview_http_api
+from .agents.mock_interview.agent import MockInterviewAgent
 from .agents.global_part_time.repository import RepositoryProtocol
 from .agents.global_part_time.service import AgentService, NotFoundError, PolicyError
 from .api.platform import create_platform_router
@@ -26,8 +29,10 @@ from .core.contracts import (
     InvalidInvocationError,
 )
 from .core.discovery import discover_agents
+from .core.rate_limit import RateLimitMiddleware
 from .core.registry import AgentRegistry
 from .core.security import IdentityMiddleware, Principal, Role, SecuritySettings, require_roles
+from .core.security_headers import SecurityHeadersMiddleware
 from .database.config import create_repository
 
 load_dotenv()
@@ -144,6 +149,7 @@ def create_app(
     # context.principal.tenant_id (see GlobalPartTimeAgent.invoke) — it's
     # handed the *root* unscoped repository here, not a fixed service.
     registry.register(GlobalPartTimeAgent(repo, expand_fn=expand_fn, embed_fn=embed_fn))
+    registry.register(MockInterviewAgent(repo, embed_fn=embed_fn))
     for agent in extra_agents:
         registry.register(agent)
     if load_plugins:
@@ -207,12 +213,30 @@ def create_app(
         description="统一发现、治理和调用多个业务 Agent；保留兼职 Agent 的兼容 API。",
         lifespan=lifespan,
     )
+    # Middleware order (LIFO): CORS → RateLimit → SecurityHeaders → Identity
+    # Add in reverse order so Identity runs first (innermost), CORS last (outermost)
     application.add_middleware(
         IdentityMiddleware,
         mode=settings.mode,
         gateway_secret=settings.gateway_secret,
         development_default_roles=settings.development_default_roles,
         auth_jwt_secret=settings.auth_jwt_secret,
+    )
+    application.add_middleware(SecurityHeadersMiddleware)
+    application.add_middleware(RateLimitMiddleware)
+
+    # CORS: allow all origins if CORS_ALLOWED_ORIGINS not set (dev mode)
+    cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+    if cors_origins:
+        allow_origins = [origin.strip() for origin in cors_origins.split(",")]
+    else:
+        allow_origins = ["*"]  # Allow all in development
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=allow_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     application.state.agent_registry = registry
     # Root (unscoped) repository — request handlers derive a tenant-scoped
@@ -238,6 +262,7 @@ def create_app(
     application.state.stream_hub = stream_hub
     application.include_router(create_platform_router(registry))
     application.include_router(http_api.router)
+    application.include_router(interview_http_api.router)
     if identity_router is not None:
         application.include_router(identity_router)
     if skill_graph_router is not None:
