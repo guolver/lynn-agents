@@ -11,11 +11,11 @@ concurrency:
 
 jobs:
   auto-fix:
-    # Only run on failure, not on auto-fix commits
+    # Only run on failure, not on commits from auto-fix bot
     if: |
       github.event.workflow_run.conclusion == 'failure' &&
       !contains(github.event.workflow_run.head_commit.message, '[skip ci]') &&
-      !contains(github.event.workflow_run.head_commit.message, 'auto-fix')
+      github.event.workflow_run.head_commit.author.name != 'AI Auto-Fix'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
