@@ -2,6 +2,34 @@
 
 This guide covers deploying Agent Hub to production environments.
 
+## CI/CD Auto-Fix Setup
+
+The project includes an auto-fix workflow that uses Claude to automatically fix CI errors.
+
+### Required Secrets
+
+1. **PAT_TOKEN**: GitHub Personal Access Token with `repo` scope
+   - Go to GitHub → Settings → Developer settings → Personal access tokens
+   - Create token with `repo` permissions
+   - Add to repo secrets as `PAT_TOKEN`
+
+2. **ANTHROPIC_API_KEY**: Claude API key
+   - Get from https://console.anthropic.com/
+   - Add to repo secrets as `ANTHROPIC_API_KEY`
+
+### How It Works
+
+```
+Push → CI fails → Auto-fix triggers → Claude reads errors → Fixes code → Push → CI reruns
+```
+
+### Safety Features
+
+- Max 2 auto-fix attempts to prevent infinite loops
+- Skips commits already marked with `[skip ci]` or `auto-fix`
+- 10 minute timeout
+- Concurrency control per branch
+
 ## Prerequisites
 
 - Docker and Docker Compose (for containerized deployment)

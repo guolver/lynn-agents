@@ -1,0 +1,123 @@
+name: Auto Fix CI Errors
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+concurrency:
+  group: auto-fix-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  auto-fix:
+    # Only run on failure, on main/feature branches, not on auto-fix commits
+    if: |
+      github.event.workflow_run.conclusion == 'failure' &&
+      !contains(github.event.workflow_run.head_commit.message, '[skip ci]') &&
+      !contains(github.event.workflow_run.head_commit.message, 'auto-fix')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          token: ${{ secrets.PAT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Check retry count
+        id: retry
+        run: |
+          # Count recent auto-fix commits (last 3 commits)
+          count=$(git log -3 --oneline --grep="auto-fix" | wc -l)
+          echo "count=$count" >> $GITHUB_OUTPUT
+          if [ "$count" -ge 2 ]; then
+            echo "::warning::Too many auto-fix attempts, stopping to prevent loop"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Get failed logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## Failed CI Run" > errors.log
+          echo "Run ID: ${{ github.event.workflow_run.id }}" >> errors.log
+          echo "Branch: ${{ github.event.workflow_run.head_branch }}" >> errors.log
+          echo "" >> errors.log
+          gh run view ${{ github.event.workflow_run.id }} --log-failed >> errors.log 2>&1 || true
+
+          # Truncate if too long (keep last 500 lines)
+          tail -500 errors.log > errors_truncated.log
+          mv errors_truncated.log errors.log
+
+          echo "=== Error Log Preview ==="
+          head -100 errors.log
+
+      - name: Run Claude to fix errors
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "CI pipeline failed. Analyze the errors below and fix the code.
+
+          Rules:
+          - Only fix the specific errors shown
+          - Do not add new features or refactor unrelated code
+          - If it's a lint error, fix it
+          - If it's a test failure, fix the test or the code
+          - If it's a type error, fix the types
+          - If you cannot fix it, explain why
+
+          Errors:
+          $(cat errors.log)" \
+          --allowedTools "Read,Edit,Bash,Glob,Grep" \
+          -y
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No changes made by Claude"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "=== Changes made ==="
+            git diff --stat
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "Claude Auto-Fix"
+          git config user.email "claude-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(ci): auto-fix errors [skip ci]
+
+          Auto-fixed by Claude Code from CI run #${{ github.event.workflow_run.id }}
+
+          Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+          git push
+
+      - name: Trigger CI rerun
+        if: steps.changes.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          # Wait a moment for push to register
+          sleep 5
+          # Trigger CI workflow on the branch
+          gh workflow run ci.yml --ref ${{ github.event.workflow_run.head_branch }} || true
