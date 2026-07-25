@@ -25,14 +25,14 @@ The project includes an auto-fix workflow that uses Claude to automatically fix 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_BASE_URL` | `https://api.deepseek.com` | API 地址 |
-| `LLM_MODEL` | `deepseek-chat` | 模型名称 |
+| `LLM_MODEL` | `deepseek-v4-flash` | 模型名称 |
 
 **常用配置：**
 
 ```bash
 # DeepSeek (默认)
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-chat
+LLM_MODEL=deepseek-v4-flash  # 或 deepseek-v4-pro
 
 # OpenAI
 LLM_BASE_URL=https://api.openai.com/v1

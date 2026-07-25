@@ -47,7 +47,7 @@ def main():
         os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
     )
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
-    model = os.getenv("LLM_MODEL", "deepseek-chat")
+    model = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 
     if not api_key:
         print("Error: Set LLM_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY")
