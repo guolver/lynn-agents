@@ -2823,6 +2823,11 @@ a {
   cursor: not-allowed;
 }
 
+.ik-header-actions {
+  display: flex;
+  gap: 10px;
+}
+
 /* ── Interview Chat Page (.iv-*) ── */
 
 .iv-layout {

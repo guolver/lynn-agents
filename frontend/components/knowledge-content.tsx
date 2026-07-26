@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 type Knowledge = {
   id: string;
@@ -33,6 +34,7 @@ const CATEGORIES: Category[] = [
 const CATEGORY_MAP = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.name]));
 
 export function KnowledgeContent() {
+  const router = useRouter();
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +66,8 @@ export function KnowledgeContent() {
       const params = filterCategory ? `?category=${filterCategory}` : '';
       const res = await fetch(`/api/interview/knowledge${params}`);
       if (res.status === 401) {
-        setError('未登录');
+        router.push('/login?redirect=/interview/knowledge');
+        return;
       } else if (res.status === 403) {
         setError('没有访问权限');
       } else if (!res.ok) {
@@ -90,7 +93,8 @@ export function KnowledgeContent() {
         const res = await fetch(`/api/interview/knowledge${params}`);
         if (cancelled) return;
         if (res.status === 401) {
-          setError('未登录');
+          router.push('/login?redirect=/interview/knowledge');
+          return;
         } else if (res.status === 403) {
           setError('没有访问权限');
         } else if (!res.ok) {
@@ -108,7 +112,7 @@ export function KnowledgeContent() {
     return () => {
       cancelled = true;
     };
-  }, [filterCategory]);
+  }, [filterCategory, router]);
 
   function openUploadModal() {
     setUploadFile(null);
@@ -230,9 +234,11 @@ export function KnowledgeContent() {
           <p className="ik-subtitle">管理面试题目、技术知识点和参考答案</p>
         </div>
         {!error && (
-          <button className="ik-add-btn" type="button" onClick={openUploadModal}>
-            上传知识
-          </button>
+          <div className="ik-header-actions">
+            <button className="ik-add-btn" type="button" onClick={openUploadModal}>
+              上传知识
+            </button>
+          </div>
         )}
       </div>
 
