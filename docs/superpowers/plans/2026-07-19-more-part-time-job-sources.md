@@ -4,7 +4,7 @@
 
 **Goal:** 新增 3 个免登录、免 API Key 的公开职位来源（Arbeitnow、Working Nomads、We Work Remotely）作为 fetcher 模块接入 Agent Hub 兼职职位管线。
 
-**Architecture:** 每个来源一个独立的纯函数模块（`fetch()` + `map_job()`），放在 `src/agent_hub/agents/global_part_time/fetchers/`，复用现有的 `_SSL_CONTEXT`/`normalize_countries`/`sanitize_html` 工具函数，最后在 `fetchers/__init__.py` 的 `REGISTRY` 里按域名注册。不改动 service/repository/agent 层——来源通过 `service.create_source()` 动态注册，worker 通过 `get_fetcher(base_url)` 按域名自动匹配。
+**Architecture:** 每个来源一个独立的纯函数模块（`fetch()` + `map_job()`），放在 `agent_hub/agents/global_part_time/fetchers/`，复用现有的 `_SSL_CONTEXT`/`normalize_countries`/`sanitize_html` 工具函数，最后在 `fetchers/__init__.py` 的 `REGISTRY` 里按域名注册。不改动 service/repository/agent 层——来源通过 `service.create_source()` 动态注册，worker 通过 `get_fetcher(base_url)` 按域名自动匹配。
 
 **Tech Stack:** Python 3.10 标准库（`urllib.request`、`json`、`xml.etree.ElementTree`、`email.utils`），`unittest` + `unittest.mock`。
 
@@ -15,7 +15,7 @@
 ### Task 1: Arbeitnow fetcher
 
 **Files:**
-- Create: `src/agent_hub/agents/global_part_time/fetchers/arbeitnow.py`
+- Create: `agent_hub/agents/global_part_time/fetchers/arbeitnow.py`
 - Test: `tests/test_arbeitnow_fetcher.py`
 
 - [ ] **Step 1: Write the failing test file**
@@ -303,7 +303,7 @@ Expected: all tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/fetchers/arbeitnow.py tests/test_arbeitnow_fetcher.py
+git add agent_hub/agents/global_part_time/fetchers/arbeitnow.py tests/test_arbeitnow_fetcher.py
 git commit -m "feat: add Arbeitnow job source fetcher"
 ```
 
@@ -312,7 +312,7 @@ git commit -m "feat: add Arbeitnow job source fetcher"
 ### Task 2: Working Nomads fetcher
 
 **Files:**
-- Create: `src/agent_hub/agents/global_part_time/fetchers/workingnomads.py`
+- Create: `agent_hub/agents/global_part_time/fetchers/workingnomads.py`
 - Test: `tests/test_workingnomads_fetcher.py`
 
 - [ ] **Step 1: Write the failing test file**
@@ -579,7 +579,7 @@ Expected: all tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/fetchers/workingnomads.py tests/test_workingnomads_fetcher.py
+git add agent_hub/agents/global_part_time/fetchers/workingnomads.py tests/test_workingnomads_fetcher.py
 git commit -m "feat: add Working Nomads job source fetcher"
 ```
 
@@ -588,7 +588,7 @@ git commit -m "feat: add Working Nomads job source fetcher"
 ### Task 3: We Work Remotely fetcher (RSS)
 
 **Files:**
-- Create: `src/agent_hub/agents/global_part_time/fetchers/weworkremotely.py`
+- Create: `agent_hub/agents/global_part_time/fetchers/weworkremotely.py`
 - Test: `tests/test_weworkremotely_fetcher.py`
 
 - [ ] **Step 1: Write the failing test file**
@@ -884,7 +884,7 @@ Expected: all tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/fetchers/weworkremotely.py tests/test_weworkremotely_fetcher.py
+git add agent_hub/agents/global_part_time/fetchers/weworkremotely.py tests/test_weworkremotely_fetcher.py
 git commit -m "feat: add We Work Remotely RSS job source fetcher"
 ```
 
@@ -893,7 +893,7 @@ git commit -m "feat: add We Work Remotely RSS job source fetcher"
 ### Task 4: Register all 3 fetchers in the domain registry
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/fetchers/__init__.py:434-451`
+- Modify: `agent_hub/agents/global_part_time/fetchers/__init__.py:434-451`
 - Test: `tests/test_fetchers_registry.py`
 
 - [ ] **Step 1: Write the failing test file**
@@ -938,7 +938,7 @@ Expected: FAIL — `test_arbeitnow_resolves`, `test_workingnomads_resolves`, `te
 
 - [ ] **Step 3: Register the new domains**
 
-In `src/agent_hub/agents/global_part_time/fetchers/__init__.py`, replace the `get_fetcher` function body (currently lines 434-451):
+In `agent_hub/agents/global_part_time/fetchers/__init__.py`, replace the `get_fetcher` function body (currently lines 434-451):
 
 ```python
 def get_fetcher(base_url: str) -> tuple[Callable, Callable] | None:
@@ -979,7 +979,7 @@ Expected: all tests PASS (existing + 4 new test files)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/fetchers/__init__.py tests/test_fetchers_registry.py
+git add agent_hub/agents/global_part_time/fetchers/__init__.py tests/test_fetchers_registry.py
 git commit -m "feat: register Arbeitnow, Working Nomads, We Work Remotely in fetcher registry"
 ```
 
@@ -991,7 +991,7 @@ git commit -m "feat: register Arbeitnow, Working Nomads, We Work Remotely in fet
 
 - [ ] **Step 1: Run ruff**
 
-Run: `ruff check src/agent_hub/agents/global_part_time/fetchers/ tests/test_arbeitnow_fetcher.py tests/test_workingnomads_fetcher.py tests/test_weworkremotely_fetcher.py tests/test_fetchers_registry.py`
+Run: `ruff check agent_hub/agents/global_part_time/fetchers/ tests/test_arbeitnow_fetcher.py tests/test_workingnomads_fetcher.py tests/test_weworkremotely_fetcher.py tests/test_fetchers_registry.py`
 Expected: no errors. If ruff flags formatting issues, run `ruff format` on the same paths and re-run `ruff check`.
 
 - [ ] **Step 2: Commit (only if ruff format changed anything)**

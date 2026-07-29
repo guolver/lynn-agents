@@ -17,7 +17,7 @@
 ### Task 1: 重写 embedding.py（SiliconFlow via openai SDK）
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/embedding.py:1-53`（替换头部与 API 调用部分；`build_candidate_text`/`build_job_text`/`cosine_similarity` 保持不变）
+- Modify: `agent_hub/agents/global_part_time/embedding.py:1-53`（替换头部与 API 调用部分；`build_candidate_text`/`build_job_text`/`cosine_similarity` 保持不变）
 - Test: `tests/test_embedding.py`（新建）
 
 - [ ] **Step 1: 写失败测试**
@@ -90,7 +90,7 @@ Expected: FAIL/ERROR（`get_embeddings` 不存在、`SILICONFLOW_API_KEY` 属性
 
 - [ ] **Step 3: 重写 embedding.py 头部**
 
-把 `src/agent_hub/agents/global_part_time/embedding.py` 从文件头到 `cosine_similarity` 之前（即原第 1-42 行，含 `get_embedding` 旧实现和 httpx import）替换为：
+把 `agent_hub/agents/global_part_time/embedding.py` 从文件头到 `cosine_similarity` 之前（即原第 1-42 行，含 `get_embedding` 旧实现和 httpx import）替换为：
 
 ```python
 """Embedding 生成与余弦相似度计算。
@@ -158,13 +158,13 @@ Expected: 4 个测试全 PASS
 
 - [ ] **Step 5: 确认无 httpx 残留并跑相关回归**
 
-Run: `grep -n httpx src/agent_hub/agents/global_part_time/embedding.py`（Expected: 无输出）
+Run: `grep -n httpx agent_hub/agents/global_part_time/embedding.py`（Expected: 无输出）
 Run: `python -m unittest tests.test_domain tests.test_service -v`（Expected: PASS，现有降级行为不受影响）
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/embedding.py tests/test_embedding.py
+git add agent_hub/agents/global_part_time/embedding.py tests/test_embedding.py
 git commit -m "feat(embedding): switch to SiliconFlow BGE-M3 with batch API"
 ```
 
@@ -173,7 +173,7 @@ git commit -m "feat(embedding): switch to SiliconFlow BGE-M3 with batch API"
 ### Task 2: domain 支持预计算语义相似度
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/domain.py:213-229`（`_semantic_score`）、`domain.py:259-267`（`score_match` 签名与调用）
+- Modify: `agent_hub/agents/global_part_time/domain.py:213-229`（`_semantic_score`）、`domain.py:259-267`（`score_match` 签名与调用）
 - Test: `tests/test_domain.py`（追加）
 
 - [ ] **Step 1: 写失败测试**
@@ -263,7 +263,7 @@ Expected: 全 PASS（含原有测试）
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py
+git add agent_hub/agents/global_part_time/domain.py tests/test_domain.py
 git commit -m "feat(domain): accept precomputed semantic similarity in score_match"
 ```
 
@@ -273,7 +273,7 @@ git commit -m "feat(domain): accept precomputed semantic similarity in score_mat
 
 **Files:**
 - Modify: `pyproject.toml:11-24`（dependencies）
-- Modify: `src/agent_hub/database/models.py:108-132`（Job 模型）
+- Modify: `agent_hub/database/models.py:108-132`（Job 模型）
 - Create: `alembic/versions/20260718_0004_job_embedding.py`
 - Modify: `tests/test_postgres_repository.py:22-25`、`tests/test_postgres_workflow.py`（setUp 附近）、`tests/test_postgres_concurrency.py`（setUp 附近）——create_all 前建扩展
 
@@ -290,7 +290,7 @@ Expected: 安装成功，含 pgvector
 
 - [ ] **Step 2: Job 模型加 embedding 列**
 
-`src/agent_hub/database/models.py` 顶部 import 区（`from sqlalchemy.dialects.postgresql import JSONB` 之后）加：
+`agent_hub/database/models.py` 顶部 import 区（`from sqlalchemy.dialects.postgresql import JSONB` 之后）加：
 
 ```python
 from pgvector.sqlalchemy import Vector
@@ -370,7 +370,7 @@ Expected: PASS（models 可正常 import；SQLite 路径不受影响）
 - [ ] **Step 7: Commit**
 
 ```bash
-git add pyproject.toml src/agent_hub/database/models.py alembic/versions/20260718_0004_job_embedding.py tests/test_postgres_repository.py tests/test_postgres_workflow.py tests/test_postgres_concurrency.py
+git add pyproject.toml agent_hub/database/models.py alembic/versions/20260718_0004_job_embedding.py tests/test_postgres_repository.py tests/test_postgres_workflow.py tests/test_postgres_concurrency.py
 git commit -m "feat(db): jobs.embedding vector(1024) column with pgvector migration"
 ```
 
@@ -379,7 +379,7 @@ git commit -m "feat(db): jobs.embedding vector(1024) column with pgvector migrat
 ### Task 4: PostgresRepository 向量方法
 
 **Files:**
-- Modify: `src/agent_hub/database/repository.py`（类末尾追加三个方法）
+- Modify: `agent_hub/database/repository.py`（类末尾追加三个方法）
 - Test: `tests/test_postgres_repository.py`（追加测试类）
 
 - [ ] **Step 1: 写失败测试**
@@ -460,7 +460,7 @@ Expected: ERROR（`AttributeError: search_jobs_by_embedding`）。没有可用 P
 
 - [ ] **Step 3: 实现三个方法**
 
-`src/agent_hub/database/repository.py` 的 `PostgresRepository` 类末尾（`idempotent` 方法之后）追加：
+`agent_hub/database/repository.py` 的 `PostgresRepository` 类末尾（`idempotent` 方法之后）追加：
 
 ```python
     # ------------------------------------------------------------------
@@ -543,7 +543,7 @@ Expected: 全 PASS（含原有 contract 测试）
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/database/repository.py tests/test_postgres_repository.py
+git add agent_hub/database/repository.py tests/test_postgres_repository.py
 git commit -m "feat(db): pgvector similarity search and embedding batch update"
 ```
 
@@ -552,7 +552,7 @@ git commit -m "feat(db): pgvector similarity search and embedding batch update"
 ### Task 5: service.run_matches 向量召回 + 检索证据落库
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/service.py:15-25`（import 区）、`service.py:257-315`（run_matches 召回与落库段）
+- Modify: `agent_hub/agents/global_part_time/service.py:15-25`（import 区）、`service.py:257-315`（run_matches 召回与落库段）
 - Test: `tests/test_service.py`（追加测试类）
 
 - [ ] **Step 1: 写失败测试**
@@ -723,7 +723,7 @@ Expected: 全 PASS（含原有测试——无向量能力的 `Repository` 走 fu
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/service.py tests/test_service.py
+git add agent_hub/agents/global_part_time/service.py tests/test_service.py
 git commit -m "feat(matching): pgvector recall stage with retrieval evidence"
 ```
 
@@ -732,7 +732,7 @@ git commit -m "feat(matching): pgvector recall stage with retrieval evidence"
 ### Task 6: worker 接入——embed 步骤、backfill 任务、embed_fn 装配
 
 **Files:**
-- Modify: `src/agent_hub/worker/tasks.py`（`_get_service_and_tracker`、`sync_source_task`、`fetch_and_sync_source_task`，末尾新增 `_embed_jobs`/`embed_jobs_task`/`backfill_embeddings_task`）
+- Modify: `agent_hub/worker/tasks.py`（`_get_service_and_tracker`、`sync_source_task`、`fetch_and_sync_source_task`，末尾新增 `_embed_jobs`/`embed_jobs_task`/`backfill_embeddings_task`）
 - Test: `tests/test_celery_tasks.py`（追加）
 
 - [ ] **Step 1: 写失败测试**
@@ -799,7 +799,7 @@ Expected: ImportError（`_embed_jobs` 不存在）
 
 - [ ] **Step 3: 实现 _embed_jobs 与两个任务**
 
-`src/agent_hub/worker/tasks.py` 末尾追加：
+`agent_hub/worker/tasks.py` 末尾追加：
 
 ```python
 # ---------------------------------------------------------------------------
@@ -925,7 +925,7 @@ Expected: 全 PASS（现有 SQLite eager 测试因 `hasattr` 门槛不触发 emb
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hub/worker/tasks.py tests/test_celery_tasks.py
+git add agent_hub/worker/tasks.py tests/test_celery_tasks.py
 git commit -m "feat(worker): embed jobs after sync and backfill task"
 ```
 

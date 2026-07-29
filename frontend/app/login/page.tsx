@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AuthShell } from '../../components/auth-shell';
 import { AuthInput } from '../../components/auth-input';
@@ -14,8 +14,10 @@ const ALERT_ICON = (
   </svg>
 );
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect') || '/';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -37,13 +39,48 @@ export default function LoginPage() {
         setSubmitting(false);
         return;
       }
-      router.push('/');
+      router.push(redirect);
     } catch {
       setError('网络错误，请稍后重试');
       setSubmitting(false);
     }
   }
 
+  return (
+    <form onSubmit={handleSubmit} className="auth-form">
+      <AuthInput
+        label="邮箱"
+        variant="email"
+        value={email}
+        onChange={setEmail}
+        placeholder="邮箱"
+        required
+        autoComplete="email"
+      />
+      <AuthInput
+        label="密码"
+        variant="password"
+        value={password}
+        onChange={setPassword}
+        placeholder="密码"
+        required
+        autoComplete="current-password"
+      />
+      {error && (
+        <div className="auth-error" role="alert">
+          {ALERT_ICON}
+          <span>{error}</span>
+        </div>
+      )}
+      <button type="submit" disabled={submitting} className="auth-submit">
+        {submitting && <span className="auth-spinner" />}
+        {submitting ? '登录中…' : '登录'}
+      </button>
+    </form>
+  );
+}
+
+export default function LoginPage() {
   return (
     <AuthShell
       subtitle="登录以继续使用 Agent Hub"
@@ -56,36 +93,9 @@ export default function LoginPage() {
         </>
       }
     >
-      <form onSubmit={handleSubmit} className="auth-form">
-        <AuthInput
-          label="邮箱"
-          variant="email"
-          value={email}
-          onChange={setEmail}
-          placeholder="邮箱"
-          required
-          autoComplete="email"
-        />
-        <AuthInput
-          label="密码"
-          variant="password"
-          value={password}
-          onChange={setPassword}
-          placeholder="密码"
-          required
-          autoComplete="current-password"
-        />
-        {error && (
-          <div className="auth-error" role="alert">
-            {ALERT_ICON}
-            <span>{error}</span>
-          </div>
-        )}
-        <button type="submit" disabled={submitting} className="auth-submit">
-          {submitting && <span className="auth-spinner" />}
-          {submitting ? '登录中…' : '登录'}
-        </button>
-      </form>
+      <Suspense fallback={<div className="auth-loading">加载中...</div>}>
+        <LoginForm />
+      </Suspense>
     </AuthShell>
   );
 }

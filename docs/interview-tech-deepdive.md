@@ -37,7 +37,7 @@
 
 ### 1.1 Embedding 生成
 
-**模型与配置** — `src/agent_hub/agents/global_part_time/embedding.py:16-19`：
+**模型与配置** — `agent_hub/agents/global_part_time/embedding.py:16-19`：
 
 ```python
 EMBEDDING_DIM = 1024
@@ -50,7 +50,7 @@ SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
 
 **调用方式**：用 `openai` SDK 指向 SiliconFlow 的 OpenAI 兼容端点，`_get_client()`（`embedding.py:24-30`）懒加载单例 `OpenAI(api_key=..., base_url=..., timeout=15.0)`。整个模块是**同步**调用，异步/批处理靠 Celery 任务包一层。
 
-**批量接口** — `get_embeddings(texts: list[str])`（`embedding.py:33-55`）：先清洗文本（`t.strip()[:8000]`，空白记为 `None` 占位），过滤出非空 payload 调一次 API，再按原始位置映射回去。批大小常量在调用方 `src/agent_hub/worker/tasks.py:413`：
+**批量接口** — `get_embeddings(texts: list[str])`（`embedding.py:33-55`）：先清洗文本（`t.strip()[:8000]`，空白记为 `None` 占位），过滤出非空 payload 调一次 API，再按原始位置映射回去。批大小常量在调用方 `agent_hub/worker/tasks.py:413`：
 
 ```python
 EMBED_BATCH_SIZE = 64
@@ -85,7 +85,7 @@ op.execute(
 2. **即便加了局部索引，当前数据量下 Planner 依然不会选择它**：约 1.1 万条 active 职位时，顺序扫描成本约 1700，HNSW 有序扫描成本约 2200~47700，顺序扫描仍更便宜。所以 `search_jobs_by_embedding()` 目前实际执行路径是「过滤 active + 内存排序」（约 100~150ms）。这次迁移只是「拆掉未来会挡路的谓词匹配障碍」，等表长大到顺序扫描更贵时索引才会被自动捡起来，不需要再改代码。
 3. 埋了一个前瞻性告警：pgvector 的 `hnsw.ef_search` 默认是 40，低于代码里的 `RECALL_LIMIT=200`；一旦 Planner 真的开始走 HNSW 索引扫描，调用方必须 `SET hnsw.ef_search >= 200`，否则 `run_matches()` 会**静默召回不到 200 条**——一枚还没触发但已写好文档的隐患。
 
-**查询本体** — `src/agent_hub/database/repository.py:699-712`：
+**查询本体** — `agent_hub/database/repository.py:699-712`：
 
 ```python
 def _search_jobs_by_embedding(
@@ -232,7 +232,7 @@ if candidate_jobs is None:
 
 ### 2.1 数据模型（main 分支实际实现）
 
-`SkillGraphService`（`src/agent_hub/skill_graph/service.py:10-14`）只接受一个 `neo4j.Driver`。节点标签只有两种：`Skill` 和 `Category`；关系只有两种（**不是三种或四种**，见开篇落差 1）：
+`SkillGraphService`（`agent_hub/skill_graph/service.py:10-14`）只接受一个 `neo4j.Driver`。节点标签只有两种：`Skill` 和 `Category`；关系只有两种（**不是三种或四种**，见开篇落差 1）：
 
 - `ALIAS_OF`：别名节点 → 规范节点
 - `CHILD_OF`：规范技能节点 → 分类节点
@@ -971,16 +971,16 @@ CMD ["sh", "-c", "alembic upgrade head && uvicorn agent_hub.app:app --host 0.0.0
 
 | 主张 | 代码位置 |
 |---|---|
-| Embedding 生成/批处理 | `src/agent_hub/agents/global_part_time/embedding.py`；批大小 `worker/tasks.py:413` |
+| Embedding 生成/批处理 | `agent_hub/agents/global_part_time/embedding.py`；批大小 `worker/tasks.py:413` |
 | pgvector 召回 | `database/repository.py:699-712`（`_search_jobs_by_embedding`）；`service.py:29`（`RECALL_LIMIT`） |
 | HNSW 索引演进 | `alembic/versions/20260718_0004_job_embedding.py`、`20260719_0008_partial_hnsw_index.py` |
 | 硬过滤 | `agents/global_part_time/domain.py:165-202`（`hard_filter`） |
 | 加权打分/完备度机制 | `domain.py:19-28`（`SCORE_WEIGHTS`）、`domain.py:279-345`（`score_match`） |
 | 语义分映射/技能折扣 | `domain.py:228-248`（`_semantic_score`）、`domain.py:251-276`（`_skill_score`） |
 | 召回评测 | `docs/recall-eval-report.md` + `scripts/eval_recall.py` |
-| 技能图谱 Cypher | `src/agent_hub/skill_graph/service.py`（`resolve`/`expand`/`seed`） |
+| 技能图谱 Cypher | `agent_hub/skill_graph/service.py`（`resolve`/`expand`/`seed`） |
 | 图谱熔断降级 | `service.py:321`（`expand_skills`闭包）、`service.py:424-452`（全批次重算） |
-| 图谱种子数据 | `src/agent_hub/skill_graph/seed.py` |
+| 图谱种子数据 | `agent_hub/skill_graph/seed.py` |
 | LLM 循环骨架 | `chat_service.py:391-634`（`stream_response`） |
 | 工具白名单 | `chat_tools.py:24-148`（`TOOL_DEFINITIONS`）、`151-276`（`execute_tool`） |
 | SSE 流式响应 | `http_api.py:866-877`（`_sse_response`） |
@@ -992,12 +992,12 @@ CMD ["sh", "-c", "alembic upgrade head && uvicorn agent_hub.app:app --host 0.0.0
 | 注册表调度 | `core/registry.py:74-89`（`invoke`） |
 | 幂等实现 | `database/repository.py:620-687`（`_idempotent`） |
 | 平台 API | `api/platform.py` |
-| MCP Server | `src/agent_hub/mcp_server.py` + `docs/mcp-server.md` |
+| MCP Server | `agent_hub/mcp_server.py` + `docs/mcp-server.md` |
 | Agent 7 个动作声明 | `agents/global_part_time/agent.py` |
 | Celery 错误分类/重试 | `worker/errors.py`（`classify`）、`worker/tasks.py`（`_run_task`） |
 | workflow 追踪 | `worker/workflow.py`（`WorkflowTracker`） |
 | 职位源 fetcher | `agents/global_part_time/fetchers/` |
-| LLM 可观测性 | `src/agent_hub/observability.py` + `docs/observability.md` |
+| LLM 可观测性 | `agent_hub/observability.py` + `docs/observability.md` |
 | RBAC 中间件 | `core/security.py`（`IdentityMiddleware`/`Principal`/`require_roles`） |
 | 归属校验 | `service.py:111-136`（`_check_candidate_owner`）、`chat_service.py:79-95`（`_owned_session`） |
 | RBAC 漏洞修复 | commit `1bc04ff`、`de8bd8f`；测试 `tests/test_chat_ownership.py` |

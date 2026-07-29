@@ -32,7 +32,7 @@
 
 ## 3. 模块划分
 
-新增 `src/agent_hub/identity/`，与 `agents/global_part_time/` 同级，沿用项目既有分层：
+新增 `agent_hub/identity/`，与 `agents/global_part_time/` 同级，沿用项目既有分层：
 
 - `domain.py`：邮箱格式、密码长度校验（纯函数）
 - `repository.py`：`users`、`refresh_tokens` 表的读写，遵循 `RepositoryProtocol` 同款的

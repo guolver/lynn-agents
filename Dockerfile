@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
-COPY src/ ./src/
+COPY agent_hub/ ./agent_hub/
 
 # 国内网络可用 --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple 加速
 ARG PIP_INDEX_URL=https://pypi.org/simple
@@ -28,4 +28,4 @@ COPY alembic/ ./alembic/
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn agent_hub.app:app --host 0.0.0.0 --reload --reload-dir src"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn agent_hub.app:app --host 0.0.0.0 --reload --reload-dir agent_hub"]

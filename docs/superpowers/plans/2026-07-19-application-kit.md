@@ -21,7 +21,7 @@
 ### Task 1: parse_resume 持久化简历原文
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/chat_tools.py`（`execute_tool` 的 `parse_resume` 分支，约 153-159 行）
+- Modify: `agent_hub/agents/global_part_time/chat_tools.py`（`execute_tool` 的 `parse_resume` 分支，约 153-159 行）
 - Test: `tests/test_chat_tools.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -97,7 +97,7 @@ Expected: 全部 PASS（含既有用例）
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/chat_tools.py tests/test_chat_tools.py
+git add agent_hub/agents/global_part_time/chat_tools.py tests/test_chat_tools.py
 git commit -m "feat(chat): persist resume raw text on candidate at parse time"
 ```
 
@@ -106,7 +106,7 @@ git commit -m "feat(chat): persist resume raw text on candidate at parse time"
 ### Task 2: get_my_profile 返回截断的简历原文
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/chat_tools.py`（`get_my_profile` 分支，约 232-234 行）
+- Modify: `agent_hub/agents/global_part_time/chat_tools.py`（`get_my_profile` 分支，约 232-234 行）
 - Test: `tests/test_chat_tools.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -163,7 +163,7 @@ Expected: 全部 PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/chat_tools.py tests/test_chat_tools.py
+git add agent_hub/agents/global_part_time/chat_tools.py tests/test_chat_tools.py
 git commit -m "feat(chat): expose truncated resume_text via get_my_profile"
 ```
 
@@ -172,7 +172,7 @@ git commit -m "feat(chat): expose truncated resume_text via get_my_profile"
 ### Task 3: SYSTEM_PROMPT 申请材料指引
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/chat_service.py`（`SYSTEM_PROMPT`，约 21-36 行）
+- Modify: `agent_hub/agents/global_part_time/chat_service.py`（`SYSTEM_PROMPT`，约 21-36 行）
 
 - [ ] **Step 1: Modify the prompt**
 
@@ -209,13 +209,13 @@ SYSTEM_PROMPT = """\
 
 - [ ] **Step 2: Verify nothing broke**
 
-Run: `python -m pytest tests/test_chat_service.py -q` 和 `ruff check src/agent_hub/agents/global_part_time/chat_service.py`
+Run: `python -m pytest tests/test_chat_service.py -q` 和 `ruff check agent_hub/agents/global_part_time/chat_service.py`
 Expected: 除已知预存在失败 `test_bind_candidate` 外全部 PASS；ruff 无报错
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/chat_service.py
+git add agent_hub/agents/global_part_time/chat_service.py
 git commit -m "feat(chat): system prompt guidance for application-kit generation"
 ```
 
@@ -437,7 +437,7 @@ git commit -m "feat(chat): wire application-kit button to chat prompt"
 
 - [ ] **Step 1: 后端全量测试与 lint**
 
-Run: `python -m pytest tests/test_chat_tools.py tests/test_chat_service.py tests/test_service.py tests/test_chat_stream_api.py -q && ruff check src/ tests/ --exclude src/agent_hub/agents/global_part_time/fetchers && ruff format --check src/agent_hub/agents/global_part_time/chat_tools.py src/agent_hub/agents/global_part_time/chat_service.py`
+Run: `python -m pytest tests/test_chat_tools.py tests/test_chat_service.py tests/test_service.py tests/test_chat_stream_api.py -q && ruff check src/ tests/ --exclude agent_hub/agents/global_part_time/fetchers && ruff format --check agent_hub/agents/global_part_time/chat_tools.py agent_hub/agents/global_part_time/chat_service.py`
 Expected: 除已知 `test_bind_candidate` 外全部 PASS；lint 干净（fetchers 的 F401 是预存在 WIP，不属于本计划）
 
 - [ ] **Step 2: 重启 worker 使 parse_resume 新代码生效**

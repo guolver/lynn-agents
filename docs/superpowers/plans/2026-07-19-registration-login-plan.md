@@ -4,7 +4,7 @@
 
 **Goal:** Implement real email/password registration and login (argon2 password hashing, self-issued JWT access tokens, revocable refresh tokens) and wire it end-to-end from the FastAPI backend through the Next.js BFF, replacing the hardcoded `X-Actor: chat-user` proxy headers.
 
-**Architecture:** A new `src/agent_hub/identity/` module (domain/repository/service/http_api layering, mirroring `agents/global_part_time/`) owns user accounts and tokens. `core/security.py`'s `IdentityMiddleware` gains an additional, independent `Authorization: Bearer <JWT>` verification path that builds a `Principal` directly from the token — the existing `trusted_gateway`/`development` header-based paths are untouched. The Next.js BFF stores tokens in httpOnly cookies and forwards `Authorization: Bearer` to FastAPI.
+**Architecture:** A new `agent_hub/identity/` module (domain/repository/service/http_api layering, mirroring `agents/global_part_time/`) owns user accounts and tokens. `core/security.py`'s `IdentityMiddleware` gains an additional, independent `Authorization: Bearer <JWT>` verification path that builds a `Principal` directly from the token — the existing `trusted_gateway`/`development` header-based paths are untouched. The Next.js BFF stores tokens in httpOnly cookies and forwards `Authorization: Bearer` to FastAPI.
 
 **Tech Stack:** FastAPI, SQLAlchemy 2, Alembic, argon2-cffi, PyJWT, Redis (rate limiting, already in the stack via Celery), Next.js Route Handlers.
 
@@ -69,7 +69,7 @@ git commit -m "build: declare argon2-cffi and pyjwt as direct dependencies"
 ## Task 2: Add `User` and `RefreshToken` models
 
 **Files:**
-- Modify: `src/agent_hub/database/models.py`
+- Modify: `agent_hub/database/models.py`
 - Modify: `tests/test_database_models.py`
 
 - [ ] **Step 1: Write the failing test — extend the exhaustive table/constraint assertions**
@@ -159,7 +159,7 @@ Expected: FAIL — `KeyError: 'users'` (table doesn't exist yet) and the `EXPECT
 
 - [ ] **Step 3: Add the models**
 
-In `src/agent_hub/database/models.py`, find the `AuditLog` class (the last model in the file) and add two new classes after it:
+In `agent_hub/database/models.py`, find the `AuditLog` class (the last model in the file) and add two new classes after it:
 
 ```python
 class User(Base):
@@ -208,7 +208,7 @@ Expected: PASS (all `DatabaseModelTest` methods).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/database/models.py tests/test_database_models.py
+git add agent_hub/database/models.py tests/test_database_models.py
 git commit -m "feat(identity): add User and RefreshToken models"
 ```
 
@@ -315,8 +315,8 @@ git commit -m "feat(identity): add users and refresh_tokens migration"
 ## Task 4: `identity/domain.py` — email and password validation
 
 **Files:**
-- Create: `src/agent_hub/identity/__init__.py`
-- Create: `src/agent_hub/identity/domain.py`
+- Create: `agent_hub/identity/__init__.py`
+- Create: `agent_hub/identity/domain.py`
 - Create: `tests/test_identity_domain.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -365,12 +365,12 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'agent_hub.identity'`
 
 - [ ] **Step 3: Create the package and implementation**
 
-Create `src/agent_hub/identity/__init__.py` (empty):
+Create `agent_hub/identity/__init__.py` (empty):
 
 ```python
 ```
 
-Create `src/agent_hub/identity/domain.py`:
+Create `agent_hub/identity/domain.py`:
 
 ```python
 """Pure validation rules for registration — no I/O, no side effects.
@@ -411,7 +411,7 @@ Expected: PASS (7 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/identity/__init__.py src/agent_hub/identity/domain.py tests/test_identity_domain.py
+git add agent_hub/identity/__init__.py agent_hub/identity/domain.py tests/test_identity_domain.py
 git commit -m "feat(identity): add email and password validation rules"
 ```
 
@@ -420,7 +420,7 @@ git commit -m "feat(identity): add email and password validation rules"
 ## Task 5: `identity/crypto.py` — password hashing, JWT, token hashing
 
 **Files:**
-- Create: `src/agent_hub/identity/crypto.py`
+- Create: `agent_hub/identity/crypto.py`
 - Create: `tests/test_identity_crypto.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -566,7 +566,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/identity/crypto.py tests/test_identity_crypto.py
+git add agent_hub/identity/crypto.py tests/test_identity_crypto.py
 git commit -m "feat(identity): add password hashing and JWT crypto primitives"
 ```
 
@@ -575,7 +575,7 @@ git commit -m "feat(identity): add password hashing and JWT crypto primitives"
 ## Task 6: `identity/rate_limiter.py` — Redis-backed login rate limiting
 
 **Files:**
-- Create: `src/agent_hub/identity/rate_limiter.py`
+- Create: `agent_hub/identity/rate_limiter.py`
 - Create: `tests/test_identity_rate_limiter.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -729,7 +729,7 @@ Expected: PASS (4 tests) if local Redis is running (`docker compose up -d redis`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/identity/rate_limiter.py tests/test_identity_rate_limiter.py
+git add agent_hub/identity/rate_limiter.py tests/test_identity_rate_limiter.py
 git commit -m "feat(identity): add Redis-backed login rate limiter"
 ```
 
@@ -738,7 +738,7 @@ git commit -m "feat(identity): add Redis-backed login rate limiter"
 ## Task 7: `identity/repository.py` — user and refresh token persistence
 
 **Files:**
-- Create: `src/agent_hub/identity/repository.py`
+- Create: `agent_hub/identity/repository.py`
 - Create: `tests/test_identity_repository.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1018,7 +1018,7 @@ Expected: PASS (7 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/identity/repository.py tests/test_identity_repository.py
+git add agent_hub/identity/repository.py tests/test_identity_repository.py
 git commit -m "feat(identity): add IdentityRepository for users and refresh tokens"
 ```
 
@@ -1027,7 +1027,7 @@ git commit -m "feat(identity): add IdentityRepository for users and refresh toke
 ## Task 8: `identity/service.py` — register/login/refresh/logout use cases
 
 **Files:**
-- Create: `src/agent_hub/identity/service.py`
+- Create: `agent_hub/identity/service.py`
 - Create: `tests/test_identity_service.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1309,7 +1309,7 @@ Expected: PASS (10 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/identity/service.py tests/test_identity_service.py
+git add agent_hub/identity/service.py tests/test_identity_service.py
 git commit -m "feat(identity): add IdentityService register/login/refresh/logout"
 ```
 
@@ -1318,7 +1318,7 @@ git commit -m "feat(identity): add IdentityService register/login/refresh/logout
 ## Task 9: `IdentityMiddleware` Bearer JWT path
 
 **Files:**
-- Modify: `src/agent_hub/core/security.py`
+- Modify: `agent_hub/core/security.py`
 - Modify: `tests/test_security.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1421,7 +1421,7 @@ Expected: FAIL — `TypeError: IdentityMiddleware.__init__() got an unexpected k
 
 - [ ] **Step 3: Modify `IdentityMiddleware` and `SecuritySettings`**
 
-In `src/agent_hub/core/security.py`, replace the `SecuritySettings` class:
+In `agent_hub/core/security.py`, replace the `SecuritySettings` class:
 
 ```python
 @dataclass(frozen=True)
@@ -1594,7 +1594,7 @@ Expected: PASS, zero regressions.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/agent_hub/core/security.py tests/test_security.py
+git add agent_hub/core/security.py tests/test_security.py
 git commit -m "feat(security): add Bearer JWT verification path to IdentityMiddleware"
 ```
 
@@ -1603,7 +1603,7 @@ git commit -m "feat(security): add Bearer JWT verification path to IdentityMiddl
 ## Task 10: `identity/http_api.py` — REST endpoints
 
 **Files:**
-- Create: `src/agent_hub/identity/http_api.py`
+- Create: `agent_hub/identity/http_api.py`
 - Create: `tests/test_identity_api.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1831,7 +1831,7 @@ Expected: PASS (9 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/identity/http_api.py tests/test_identity_api.py
+git add agent_hub/identity/http_api.py tests/test_identity_api.py
 git commit -m "feat(identity): add /auth register, login, refresh, logout endpoints"
 ```
 
@@ -1840,11 +1840,11 @@ git commit -m "feat(identity): add /auth register, login, refresh, logout endpoi
 ## Task 11: Wire identity into `create_app`
 
 **Files:**
-- Modify: `src/agent_hub/app.py`
+- Modify: `agent_hub/app.py`
 
 - [ ] **Step 1: Add the middleware secret and optional identity wiring**
 
-In `src/agent_hub/app.py`, update the `IdentityMiddleware` registration (around line 166) to pass the new secret:
+In `agent_hub/app.py`, update the `IdentityMiddleware` registration (around line 166) to pass the new secret:
 
 ```python
     application.add_middleware(
@@ -1916,7 +1916,7 @@ Expected: JSON response with `access_token`, `refresh_token`, `expires_in`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/agent_hub/app.py
+git add agent_hub/app.py
 git commit -m "feat(identity): wire registration/login into create_app"
 ```
 

@@ -26,18 +26,53 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.siliconflow.cn/v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      FILE_PARSER_URL: http://file-parser:8001
     depends_on:
+      file-parser:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       neo4j:
         condition: service_healthy
+    networks:
+      - default
+      - parser-internal
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  file-parser:
+    build:
+      context: ./agent_hub/file_parser
+      dockerfile: Dockerfile
+    expose:
+      - '8001'
+    # 资源限制
+    mem_limit: 512m
+    mem_reservation: 256m
+    cpus: 1
+    # 安全加固
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # 网络隔离：只能被内部服务访问
+    networks:
+      - parser-internal
+      - default
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   frontend:
     build: ./frontend
@@ -133,6 +168,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+networks:
+  parser-internal:
+    internal: true  # 无外网访问，只能内部通信
 
 volumes:
   pg_data:

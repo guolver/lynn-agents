@@ -21,9 +21,9 @@
 
 ## File Structure
 
-- Modify: `src/agent_hub/agents/global_part_time/domain.py` — 扩展多维确定性理由并更新规则版本。
-- Create: `src/agent_hub/agents/global_part_time/recommendation_explainer.py` — 批量生成和校验个性化总结。
-- Modify: `src/agent_hub/agents/global_part_time/chat_tools.py` — 调用解释器并附加总结。
+- Modify: `agent_hub/agents/global_part_time/domain.py` — 扩展多维确定性理由并更新规则版本。
+- Create: `agent_hub/agents/global_part_time/recommendation_explainer.py` — 批量生成和校验个性化总结。
+- Modify: `agent_hub/agents/global_part_time/chat_tools.py` — 调用解释器并附加总结。
 - Modify: `frontend/components/chat-message.tsx` — 分层渲染总结和理由。
 - Modify: `tests/test_domain.py` — 覆盖理由维度、上限和真实性。
 - Create: `tests/test_recommendation_explainer.py` — 覆盖批量调用和降级。
@@ -32,7 +32,7 @@
 ### Task 1: 扩展确定性多维理由
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/domain.py`
+- Modify: `agent_hub/agents/global_part_time/domain.py`
 - Test: `tests/test_domain.py`
 
 **Interfaces:**
@@ -92,7 +92,7 @@ Expected: 全部 PASS。
 ### Task 2: 实现批量 LLM 推荐总结
 
 **Files:**
-- Create: `src/agent_hub/agents/global_part_time/recommendation_explainer.py`
+- Create: `agent_hub/agents/global_part_time/recommendation_explainer.py`
 - Create: `tests/test_recommendation_explainer.py`
 
 **Interfaces:**
@@ -144,7 +144,7 @@ Expected: 全部 PASS。
 ### Task 3: 接入聊天工具并安全降级
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/chat_tools.py`
+- Modify: `agent_hub/agents/global_part_time/chat_tools.py`
 - Modify: `tests/test_chat_tools.py`
 
 **Interfaces:**
@@ -259,9 +259,9 @@ Run:
 rg --files tests -g 'test_*.py' | rg -v 'tests/test_skill_graph.py' | xargs .venv/bin/python -m unittest
 .venv/bin/ruff check src/ tests/
 .venv/bin/ruff format --check \
-  src/agent_hub/agents/global_part_time/domain.py \
-  src/agent_hub/agents/global_part_time/recommendation_explainer.py \
-  src/agent_hub/agents/global_part_time/chat_tools.py \
+  agent_hub/agents/global_part_time/domain.py \
+  agent_hub/agents/global_part_time/recommendation_explainer.py \
+  agent_hub/agents/global_part_time/chat_tools.py \
   tests/test_domain.py tests/test_recommendation_explainer.py tests/test_chat_tools.py
 ```
 
@@ -275,15 +275,15 @@ Run: `git diff --check && git status --short`
 
 ```bash
 git add \
-  src/agent_hub/agents/global_part_time/domain.py \
-  src/agent_hub/agents/global_part_time/recommendation_explainer.py \
-  src/agent_hub/agents/global_part_time/chat_tools.py \
+  agent_hub/agents/global_part_time/domain.py \
+  agent_hub/agents/global_part_time/recommendation_explainer.py \
+  agent_hub/agents/global_part_time/chat_tools.py \
   tests/test_domain.py tests/test_recommendation_explainer.py tests/test_chat_tools.py \
   frontend/components/chat-message.tsx
 git commit --only \
-  src/agent_hub/agents/global_part_time/domain.py \
-  src/agent_hub/agents/global_part_time/recommendation_explainer.py \
-  src/agent_hub/agents/global_part_time/chat_tools.py \
+  agent_hub/agents/global_part_time/domain.py \
+  agent_hub/agents/global_part_time/recommendation_explainer.py \
+  agent_hub/agents/global_part_time/chat_tools.py \
   tests/test_domain.py tests/test_recommendation_explainer.py tests/test_chat_tools.py \
   frontend/components/chat-message.tsx \
   -m "feat: add hybrid recommendation explanations"

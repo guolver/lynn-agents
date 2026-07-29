@@ -17,7 +17,7 @@
 ## 模块结构
 
 ```
-src/agent_hub/agents/global_part_time/fetchers/
+agent_hub/agents/global_part_time/fetchers/
 ├── arbeitnow.py          # fetch() + map_job()
 ├── workingnomads.py      # fetch() + map_job()
 ├── weworkremotely.py     # fetch() + map_job()（RSS/XML，非 JSON）

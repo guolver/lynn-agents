@@ -25,7 +25,7 @@ Browser / API Client
 ## 项目结构
 
 ```
-src/agent_hub/
+agent_hub/
 ├── core/                         # 平台契约和注册表
 ├── api/platform.py               # Agent 发现与统一调用 API
 ├── app.py                        # 依赖组装入口
@@ -63,8 +63,8 @@ docs/                             # 架构文档
 source .venv/bin/activate
 uvicorn agent_hub.app:app --reload        # 启动后端
 python -m unittest discover -s tests -v   # 运行测试
-ruff check src/ tests/                    # 代码检查
-ruff format src/ tests/                   # 代码格式化
+ruff check agent_hub/ tests/              # 代码检查
+ruff format agent_hub/ tests/             # 代码格式化
 
 # 前端
 cd frontend
@@ -102,4 +102,6 @@ POST /platform/v1/agents/{agent_id}/actions/{name} # 调用动作
 - [LLM 可观测性](docs/observability.md)
 - [开发环境搭建](docs/dev-guide.md)
 - [云端部署方案](docs/cloud-deployment.md)
+- [Railway 快速部署](docs/railway-quickstart.md)
+- [文件解析沙箱](docs/file-parser-sandbox.md)
 - [市场推广策略](docs/go-to-market.md)

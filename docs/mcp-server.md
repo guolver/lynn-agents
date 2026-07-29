@@ -1,6 +1,6 @@
 # MCP Server：把 Agent 平台动作暴露给任意 MCP 客户端
 
-> 模块：`src/agent_hub/mcp_server.py`。让 Claude Code / Claude Desktop 等支持
+> 模块：`agent_hub/mcp_server.py`。让 Claude Code / Claude Desktop 等支持
 > MCP（Model Context Protocol）的客户端，直接调用 Agent Hub 的白名单动作。
 
 ## 设计原则：瘦客户端，治理不下放

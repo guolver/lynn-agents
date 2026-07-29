@@ -30,13 +30,13 @@
 
 | File | Responsibility |
 | --- | --- |
-| `src/agent_hub/skill_graph/types.py` | Immutable expansion/evidence result types and stable JSON conversion |
-| `src/agent_hub/skill_graph/seed.py` | Canonical categories, aliases, curated relations, and pure seed validation |
-| `src/agent_hub/skill_graph/service.py` | Idempotent relationship seeding and bounded Neo4j evidence queries |
-| `src/agent_hub/skill_graph/__init__.py` | Public graph type and service exports |
-| `src/agent_hub/agents/global_part_time/domain.py` | Directional path selection and deterministic weighted skill scoring |
-| `src/agent_hub/agents/global_part_time/service.py` | Whole-batch graph scoring/fallback and match evidence persistence |
-| `src/agent_hub/app.py` | Inject the rich expansion callback while preserving lifecycle cleanup |
+| `agent_hub/skill_graph/types.py` | Immutable expansion/evidence result types and stable JSON conversion |
+| `agent_hub/skill_graph/seed.py` | Canonical categories, aliases, curated relations, and pure seed validation |
+| `agent_hub/skill_graph/service.py` | Idempotent relationship seeding and bounded Neo4j evidence queries |
+| `agent_hub/skill_graph/__init__.py` | Public graph type and service exports |
+| `agent_hub/agents/global_part_time/domain.py` | Directional path selection and deterministic weighted skill scoring |
+| `agent_hub/agents/global_part_time/service.py` | Whole-batch graph scoring/fallback and match evidence persistence |
+| `agent_hub/app.py` | Inject the rich expansion callback while preserving lifecycle cleanup |
 | `tests/test_skill_graph_types.py` | Type serialization and ordering unit tests |
 | `tests/test_skill_graph_seed.py` | Pure seed validation tests without Docker |
 | `tests/test_skill_graph.py` | Real Neo4j seed/traversal integration tests |
@@ -53,9 +53,9 @@
 ### Task 1: Add Typed Evidence Results and Validated Relation Seed
 
 **Files:**
-- Create: `src/agent_hub/skill_graph/types.py`
-- Modify: `src/agent_hub/skill_graph/seed.py`
-- Modify: `src/agent_hub/skill_graph/__init__.py`
+- Create: `agent_hub/skill_graph/types.py`
+- Modify: `agent_hub/skill_graph/seed.py`
+- Modify: `agent_hub/skill_graph/__init__.py`
 - Create: `tests/test_skill_graph_types.py`
 - Create: `tests/test_skill_graph_seed.py`
 
@@ -121,7 +121,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'agent_hub.skill_graph
 
 - [ ] **Step 3: Implement the immutable result types**
 
-Create `src/agent_hub/skill_graph/types.py`:
+Create `agent_hub/skill_graph/types.py`:
 
 ```python
 from __future__ import annotations
@@ -228,7 +228,7 @@ Expected: FAIL because `SKILL_RELATIONS` and `validate_seed` are not defined.
 
 - [ ] **Step 7: Add the exact curated relations and validator**
 
-Append to `src/agent_hub/skill_graph/seed.py`:
+Append to `agent_hub/skill_graph/seed.py`:
 
 ```python
 SUPPORTED_RELATIONS = {"REQUIRES", "RELATED_TO"}
@@ -306,18 +306,18 @@ def validate_seed(categories: dict, relations: list[dict[str, str]]) -> None:
 validate_seed(SKILL_GRAPH_SEED, SKILL_RELATIONS)
 ```
 
-Export `ExpansionEvidence` and `ExpansionResult` from `src/agent_hub/skill_graph/__init__.py`.
+Export `ExpansionEvidence` and `ExpansionResult` from `agent_hub/skill_graph/__init__.py`.
 
 - [ ] **Step 8: Run Task 1 verification**
 
-Run: `.venv/bin/python -m pytest tests/test_skill_graph_types.py tests/test_skill_graph_seed.py tests/test_skill_graph.py --collect-only -q && .venv/bin/ruff check src/agent_hub/skill_graph tests/test_skill_graph_types.py tests/test_skill_graph_seed.py`
+Run: `.venv/bin/python -m pytest tests/test_skill_graph_types.py tests/test_skill_graph_seed.py tests/test_skill_graph.py --collect-only -q && .venv/bin/ruff check agent_hub/skill_graph tests/test_skill_graph_types.py tests/test_skill_graph_seed.py`
 
 Expected: new 7 tests PASS when run normally; existing Neo4j tests collect; Ruff exits 0.
 
 - [ ] **Step 9: Commit Task 1**
 
 ```bash
-git add src/agent_hub/skill_graph tests/test_skill_graph_types.py tests/test_skill_graph_seed.py
+git add agent_hub/skill_graph tests/test_skill_graph_types.py tests/test_skill_graph_seed.py
 git commit -m "feat: add typed skill graph evidence and relations"
 ```
 
@@ -326,7 +326,7 @@ git commit -m "feat: add typed skill graph evidence and relations"
 ### Task 2: Implement Bounded Neo4j Evidence Expansion
 
 **Files:**
-- Modify: `src/agent_hub/skill_graph/service.py`
+- Modify: `agent_hub/skill_graph/service.py`
 - Modify: `tests/test_skill_graph.py`
 
 **Interfaces:**
@@ -531,14 +531,14 @@ Run: `.venv/bin/python -m pytest tests/test_skill_graph.py::SkillGraphServiceTes
 Expected: all service tests PASS when the Neo4j image is available. If the image cannot be
 downloaded, record the Docker error and run `--collect-only`; do not report integration PASS.
 
-Run: `.venv/bin/ruff check src/agent_hub/skill_graph tests/test_skill_graph.py && .venv/bin/ruff format --check src/agent_hub/skill_graph tests/test_skill_graph.py`
+Run: `.venv/bin/ruff check agent_hub/skill_graph tests/test_skill_graph.py && .venv/bin/ruff format --check agent_hub/skill_graph tests/test_skill_graph.py`
 
 Expected: both commands exit 0.
 
 - [ ] **Step 6: Commit Task 2**
 
 ```bash
-git add src/agent_hub/skill_graph/service.py tests/test_skill_graph.py
+git add agent_hub/skill_graph/service.py tests/test_skill_graph.py
 git commit -m "feat: add bounded weighted skill graph traversal"
 ```
 
@@ -547,7 +547,7 @@ git commit -m "feat: add bounded weighted skill graph traversal"
 ### Task 3: Add Deterministic Weighted Domain Scoring
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/domain.py`
+- Modify: `agent_hub/agents/global_part_time/domain.py`
 - Modify: `tests/test_domain.py`
 
 **Interfaces:**
@@ -760,14 +760,14 @@ Run: `.venv/bin/python -m pytest tests/test_domain.py -v`
 
 Expected: all existing and new domain tests PASS.
 
-Run: `.venv/bin/ruff check src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py && .venv/bin/ruff format --check src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py`
+Run: `.venv/bin/ruff check agent_hub/agents/global_part_time/domain.py tests/test_domain.py && .venv/bin/ruff format --check agent_hub/agents/global_part_time/domain.py tests/test_domain.py`
 
 Expected: both commands exit 0.
 
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py
+git add agent_hub/agents/global_part_time/domain.py tests/test_domain.py
 git commit -m "feat: add weighted explainable skill scoring"
 ```
 
@@ -776,8 +776,8 @@ git commit -m "feat: add weighted explainable skill scoring"
 ### Task 4: Persist Evidence With Whole-Batch Fallback
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/service.py`
-- Modify: `src/agent_hub/app.py`
+- Modify: `agent_hub/agents/global_part_time/service.py`
+- Modify: `agent_hub/app.py`
 - Modify: `tests/test_service.py`
 - Modify: `tests/test_app_skill_graph_lifecycle.py`
 
@@ -945,14 +945,14 @@ Run: `.venv/bin/python -m pytest tests/test_service.py tests/test_app_skill_grap
 
 Expected: all tests PASS; no partial or mixed graph/direct batch is persisted.
 
-Run: `.venv/bin/ruff check src/agent_hub/app.py src/agent_hub/agents/global_part_time tests/test_service.py tests/test_app_skill_graph_lifecycle.py && .venv/bin/ruff format --check src/agent_hub/app.py src/agent_hub/agents/global_part_time tests/test_service.py tests/test_app_skill_graph_lifecycle.py`
+Run: `.venv/bin/ruff check agent_hub/app.py agent_hub/agents/global_part_time tests/test_service.py tests/test_app_skill_graph_lifecycle.py && .venv/bin/ruff format --check agent_hub/app.py agent_hub/agents/global_part_time tests/test_service.py tests/test_app_skill_graph_lifecycle.py`
 
 Expected: both commands exit 0.
 
 - [ ] **Step 6: Commit Task 4**
 
 ```bash
-git add src/agent_hub/app.py src/agent_hub/agents/global_part_time/domain.py src/agent_hub/agents/global_part_time/service.py tests/test_service.py tests/test_app_skill_graph_lifecycle.py
+git add agent_hub/app.py agent_hub/agents/global_part_time/domain.py agent_hub/agents/global_part_time/service.py tests/test_service.py tests/test_app_skill_graph_lifecycle.py
 git commit -m "feat: persist skill graph match evidence"
 ```
 
@@ -1101,7 +1101,7 @@ Expected: all collected non-Docker tests PASS; PostgreSQL tests may SKIP only wh
 
 - [ ] **Step 4: Run quality checks**
 
-Run: `.venv/bin/ruff check src tests && .venv/bin/ruff format --check src/agent_hub/skill_graph src/agent_hub/agents/global_part_time/domain.py src/agent_hub/agents/global_part_time/service.py src/agent_hub/app.py tests/test_skill_graph.py tests/test_skill_graph_types.py tests/test_skill_graph_seed.py tests/test_domain.py tests/test_service.py tests/test_app_skill_graph_lifecycle.py && git diff --check`
+Run: `.venv/bin/ruff check src tests && .venv/bin/ruff format --check agent_hub/skill_graph agent_hub/agents/global_part_time/domain.py agent_hub/agents/global_part_time/service.py agent_hub/app.py tests/test_skill_graph.py tests/test_skill_graph_types.py tests/test_skill_graph_seed.py tests/test_domain.py tests/test_service.py tests/test_app_skill_graph_lifecycle.py && git diff --check`
 
 Expected: all commands exit 0.
 

@@ -16,7 +16,7 @@
 ## 模块结构
 
 ```
-src/agent_hub/agents/global_part_time/
+agent_hub/agents/global_part_time/
 └── fetchers/
     ├── __init__.py
     └── remoteok.py         # fetch() + map_job()

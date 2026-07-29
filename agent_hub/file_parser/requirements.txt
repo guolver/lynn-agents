@@ -1,0 +1,20 @@
+# File Parser Sandbox Dependencies
+# 独立于主服务的依赖，保持最小化
+
+# Web 框架
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+python-multipart>=0.0.6
+
+# 文件解析
+pypdf>=3.0.0
+python-docx>=0.8.11
+openpyxl>=3.1.0
+beautifulsoup4>=4.12.0
+Pillow>=10.0.0
+
+# OCR (可选，需要系统安装 tesseract)
+# pytesseract>=0.3.10
+
+# 安全
+# python-magic>=0.4.27  # 需要 libmagic，可选

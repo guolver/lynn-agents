@@ -16,8 +16,8 @@
 
 | File | Responsibility |
 |------|---------------|
-| `src/agent_hub/agents/global_part_time/fetchers/__init__.py` | Package marker (empty) |
-| `src/agent_hub/agents/global_part_time/fetchers/remoteok.py` | `strip_html()`, `map_job()`, `fetch()` — pure functions for data retrieval and transformation |
+| `agent_hub/agents/global_part_time/fetchers/__init__.py` | Package marker (empty) |
+| `agent_hub/agents/global_part_time/fetchers/remoteok.py` | `strip_html()`, `map_job()`, `fetch()` — pure functions for data retrieval and transformation |
 | `scripts/sync_remoteok.py` | CLI entry point: register source → approve → fetch → map → sync |
 | `tests/test_remoteok_fetcher.py` | Unit tests for strip_html, map_job, fetch, and end-to-end sync |
 
@@ -27,8 +27,8 @@
 
 **Files:**
 - Create: `tests/test_remoteok_fetcher.py`
-- Create: `src/agent_hub/agents/global_part_time/fetchers/__init__.py`
-- Create: `src/agent_hub/agents/global_part_time/fetchers/remoteok.py`
+- Create: `agent_hub/agents/global_part_time/fetchers/__init__.py`
+- Create: `agent_hub/agents/global_part_time/fetchers/remoteok.py`
 
 - [ ] **Step 1: Write the failing tests for strip_html**
 
@@ -74,9 +74,9 @@ Expected: FAIL — `ModuleNotFoundError` or `ImportError`
 
 - [ ] **Step 3: Create package and implement strip_html**
 
-Create `src/agent_hub/agents/global_part_time/fetchers/__init__.py` (empty file).
+Create `agent_hub/agents/global_part_time/fetchers/__init__.py` (empty file).
 
-Create `src/agent_hub/agents/global_part_time/fetchers/remoteok.py`:
+Create `agent_hub/agents/global_part_time/fetchers/remoteok.py`:
 
 ```python
 """RemoteOK public API fetcher and field mapper.
@@ -121,8 +121,8 @@ Expected: All 6 tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/fetchers/__init__.py \
-        src/agent_hub/agents/global_part_time/fetchers/remoteok.py \
+git add agent_hub/agents/global_part_time/fetchers/__init__.py \
+        agent_hub/agents/global_part_time/fetchers/remoteok.py \
         tests/test_remoteok_fetcher.py
 git commit -m "feat: add strip_html utility for RemoteOK fetcher"
 ```
@@ -133,7 +133,7 @@ git commit -m "feat: add strip_html utility for RemoteOK fetcher"
 
 **Files:**
 - Modify: `tests/test_remoteok_fetcher.py`
-- Modify: `src/agent_hub/agents/global_part_time/fetchers/remoteok.py`
+- Modify: `agent_hub/agents/global_part_time/fetchers/remoteok.py`
 
 - [ ] **Step 1: Write the failing tests for map_job**
 
@@ -265,7 +265,7 @@ Expected: FAIL — `ImportError: cannot import name 'map_job'`
 
 - [ ] **Step 3: Implement map_job**
 
-Add to `src/agent_hub/agents/global_part_time/fetchers/remoteok.py`:
+Add to `agent_hub/agents/global_part_time/fetchers/remoteok.py`:
 
 ```python
 from datetime import datetime, timezone
@@ -327,7 +327,7 @@ Expected: All tests PASS (StripHtml + MapJob)
 
 ```bash
 git add tests/test_remoteok_fetcher.py \
-        src/agent_hub/agents/global_part_time/fetchers/remoteok.py
+        agent_hub/agents/global_part_time/fetchers/remoteok.py
 git commit -m "feat: add map_job for RemoteOK → system schema conversion"
 ```
 
@@ -337,7 +337,7 @@ git commit -m "feat: add map_job for RemoteOK → system schema conversion"
 
 **Files:**
 - Modify: `tests/test_remoteok_fetcher.py`
-- Modify: `src/agent_hub/agents/global_part_time/fetchers/remoteok.py`
+- Modify: `agent_hub/agents/global_part_time/fetchers/remoteok.py`
 
 - [ ] **Step 1: Write the failing tests for fetch**
 
@@ -425,7 +425,7 @@ Expected: FAIL — `ImportError: cannot import name 'fetch'`
 
 - [ ] **Step 3: Implement fetch**
 
-Add to `src/agent_hub/agents/global_part_time/fetchers/remoteok.py`:
+Add to `agent_hub/agents/global_part_time/fetchers/remoteok.py`:
 
 ```python
 import json
@@ -462,7 +462,7 @@ Expected: All tests PASS
 
 ```bash
 git add tests/test_remoteok_fetcher.py \
-        src/agent_hub/agents/global_part_time/fetchers/remoteok.py
+        agent_hub/agents/global_part_time/fetchers/remoteok.py
 git commit -m "feat: add fetch() for RemoteOK API retrieval"
 ```
 
@@ -670,12 +670,12 @@ git commit -m "feat: add CLI script for RemoteOK sync pipeline"
 
 - [ ] **Step 1: Run ruff check**
 
-Run: `ruff check src/agent_hub/agents/global_part_time/fetchers/ scripts/ tests/test_remoteok_fetcher.py`
+Run: `ruff check agent_hub/agents/global_part_time/fetchers/ scripts/ tests/test_remoteok_fetcher.py`
 Expected: No errors (fix any issues before proceeding)
 
 - [ ] **Step 2: Run ruff format**
 
-Run: `ruff format src/agent_hub/agents/global_part_time/fetchers/ scripts/ tests/test_remoteok_fetcher.py`
+Run: `ruff format agent_hub/agents/global_part_time/fetchers/ scripts/ tests/test_remoteok_fetcher.py`
 Expected: Files formatted
 
 - [ ] **Step 3: Run the full test suite**

@@ -261,8 +261,8 @@ Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- test
 ### Task 3: 删除 SQLite 代码 + 全面切换
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/repository.py`（只留协议）
-- Modify: `src/agent_hub/database/config.py`
+- Modify: `agent_hub/agents/global_part_time/repository.py`（只留协议）
+- Modify: `agent_hub/database/config.py`
 - Modify: `tests/test_service.py`、`tests/test_api.py`、`tests/test_app_skill_graph_lifecycle.py`、`tests/test_remotive_fetcher.py`、`tests/test_remoteok_fetcher.py`、`tests/test_celery_tasks.py`、`tests/test_database_config.py`
 - Modify: `.env.example`、`CLAUDE.md`
 - Delete: `scripts/migrate_sqlite_to_pg.py`
@@ -349,7 +349,7 @@ Expected: 测试除既有无关失败（remoteok/remotive 国家码、database_m
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/repository.py src/agent_hub/database/config.py \
+git add agent_hub/agents/global_part_time/repository.py agent_hub/database/config.py \
   tests/test_service.py tests/test_api.py tests/test_app_skill_graph_lifecycle.py \
   tests/test_remotive_fetcher.py tests/test_remoteok_fetcher.py tests/test_celery_tasks.py \
   tests/test_database_config.py .env.example CLAUDE.md

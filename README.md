@@ -43,7 +43,7 @@ pnpm dev
 ## 项目结构
 
 ```text
-src/agent_hub/
+agent_hub/
 ├── core/                         # 稳定平台契约和注册表
 ├── api/platform.py               # Agent 发现与统一调用 API
 ├── app.py                        # 唯一依赖组装入口

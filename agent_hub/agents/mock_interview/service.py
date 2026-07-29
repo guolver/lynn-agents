@@ -26,15 +26,61 @@ MAX_HISTORY_MESSAGES = 30
 
 
 class InterviewService:
-    """面试 Agent 核心服务：知识库管理和面试对话。"""
+    """面试 Agent 核心服务：知识库管理和面试对话。
+
+    支持两种运行模式：
+    - 直接模式（默认）：直接调用 LLM 和知识库
+    - Harness 模式：使用 PEV 循环，提供边界约束和重试能力
+
+    Args:
+        repo: 持久化仓储
+        embed_fn: 嵌入函数
+        use_harness: 是否使用 Harness 模式
+        harness_strict_verify: 是否使用严格校验（仅 Harness 模式）
+    """
 
     def __init__(
         self,
         repo: InterviewRepository,
         embed_fn: Callable[[str], list[float] | None] | None = None,
+        *,
+        use_harness: bool = False,
+        harness_strict_verify: bool = False,
     ):
         self.repo = repo
         self.embed_fn = embed_fn
+        self._use_harness = use_harness
+        self._harness: Any = None
+
+        # 懒加载 Harness 服务
+        if use_harness:
+            self._init_harness(strict_verify=harness_strict_verify)
+
+    def _init_harness(self, strict_verify: bool = False) -> None:
+        """初始化 Harness 服务（懒加载）"""
+        from .harness_service import HarnessMockInterviewService
+
+        self._harness = HarnessMockInterviewService(
+            self,
+            strict_verify=strict_verify,
+        )
+
+    @property
+    def use_harness(self) -> bool:
+        """是否使用 Harness 模式"""
+        return self._use_harness
+
+    @use_harness.setter
+    def use_harness(self, value: bool) -> None:
+        """设置 Harness 模式"""
+        if value and self._harness is None:
+            self._init_harness()
+        self._use_harness = value
+
+    @property
+    def harness(self) -> Any:
+        """获取 Harness 服务实例"""
+        return self._harness
 
     # -------------------------------------------------------------------------
     # 知识库管理
@@ -234,7 +280,16 @@ class InterviewService:
     def stream_response(
         self, session_id: str, user_message: str
     ) -> Generator[dict[str, Any], None, None]:
-        """处理用户消息并流式返回面试官回复。"""
+        """处理用户消息并流式返回面试官回复。
+
+        如果启用了 Harness 模式，将委托给 HarnessMockInterviewService 处理，
+        在原有逻辑之上添加边界约束和状态管理。
+        """
+        # Harness 模式委托
+        if self._use_harness and self._harness is not None:
+            yield from self._harness.stream_response(session_id, user_message)
+            return
+
         session = self.repo.get_session(session_id)
         if not session:
             yield {"event": "error", "data": {"detail": "Session not found"}}

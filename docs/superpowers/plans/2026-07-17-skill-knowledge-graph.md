@@ -13,7 +13,7 @@
 ## File Structure
 
 ```
-src/agent_hub/skill_graph/
+agent_hub/skill_graph/
 ├── __init__.py              # Re-export SkillGraphService
 ├── config.py                # Neo4j connection config (env-based)
 ├── seed.py                  # SKILL_GRAPH_SEED dict
@@ -23,11 +23,11 @@ tests/
 ├── test_skill_graph.py      # Neo4j integration tests (skipped without Docker)
 └── test_domain.py           # Modified: add _skill_score expansion tests
 
-src/agent_hub/agents/global_part_time/
+agent_hub/agents/global_part_time/
 ├── domain.py                # Modified: _skill_score gains expand_fn param
 └── service.py               # Modified: inject expand_fn into score_match
 
-src/agent_hub/app.py         # Modified: init SkillGraphService at startup
+agent_hub/app.py         # Modified: init SkillGraphService at startup
 pyproject.toml               # Modified: add neo4j + testcontainers deps
 ```
 
@@ -74,8 +74,8 @@ git commit -m "feat: add neo4j and testcontainers dependencies"
 ### Task 2: Neo4j Connection Config
 
 **Files:**
-- Create: `src/agent_hub/skill_graph/__init__.py`
-- Create: `src/agent_hub/skill_graph/config.py`
+- Create: `agent_hub/skill_graph/__init__.py`
+- Create: `agent_hub/skill_graph/config.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -122,13 +122,13 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'agent_hub.skill_graph
 
 - [ ] **Step 3: Create the skill_graph package and config module**
 
-Create `src/agent_hub/skill_graph/__init__.py`:
+Create `agent_hub/skill_graph/__init__.py`:
 
 ```python
 """Skill knowledge graph backed by Neo4j."""
 ```
 
-Create `src/agent_hub/skill_graph/config.py`:
+Create `agent_hub/skill_graph/config.py`:
 
 ```python
 """Neo4j connection factory."""
@@ -166,7 +166,7 @@ Expected: PASS (or SKIP if Docker not available)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/skill_graph/__init__.py src/agent_hub/skill_graph/config.py tests/test_skill_graph.py
+git add agent_hub/skill_graph/__init__.py agent_hub/skill_graph/config.py tests/test_skill_graph.py
 git commit -m "feat: add Neo4j connection config with env-based factory"
 ```
 
@@ -175,7 +175,7 @@ git commit -m "feat: add Neo4j connection config with env-based factory"
 ### Task 3: Seed Data
 
 **Files:**
-- Create: `src/agent_hub/skill_graph/seed.py`
+- Create: `agent_hub/skill_graph/seed.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -221,7 +221,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'agent_hub.skill_graph
 
 - [ ] **Step 3: Create seed data module**
 
-Create `src/agent_hub/skill_graph/seed.py`:
+Create `agent_hub/skill_graph/seed.py`:
 
 ```python
 """Seed data for the skill knowledge graph.
@@ -327,7 +327,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/skill_graph/seed.py tests/test_skill_graph.py
+git add agent_hub/skill_graph/seed.py tests/test_skill_graph.py
 git commit -m "feat: add skill knowledge graph seed data for 6 dev categories"
 ```
 
@@ -336,8 +336,8 @@ git commit -m "feat: add skill knowledge graph seed data for 6 dev categories"
 ### Task 4: SkillGraphService — seed(), resolve(), expand()
 
 **Files:**
-- Create: `src/agent_hub/skill_graph/service.py`
-- Modify: `src/agent_hub/skill_graph/__init__.py`
+- Create: `agent_hub/skill_graph/service.py`
+- Modify: `agent_hub/skill_graph/__init__.py`
 - Modify: `tests/test_skill_graph.py`
 
 - [ ] **Step 1: Write failing tests for seed and resolve**
@@ -403,7 +403,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'agent_hub.skill_graph
 
 - [ ] **Step 3: Implement SkillGraphService**
 
-Create `src/agent_hub/skill_graph/service.py`:
+Create `agent_hub/skill_graph/service.py`:
 
 ```python
 """Skill knowledge graph service backed by Neo4j."""
@@ -496,7 +496,7 @@ class SkillGraphService:
             return set(record["expanded"])
 ```
 
-Update `src/agent_hub/skill_graph/__init__.py`:
+Update `agent_hub/skill_graph/__init__.py`:
 
 ```python
 """Skill knowledge graph backed by Neo4j."""
@@ -513,12 +513,12 @@ Expected: All 7 tests PASS (or all SKIP if Docker not available)
 
 - [ ] **Step 5: Run ruff**
 
-Run: `ruff check src/agent_hub/skill_graph/ tests/test_skill_graph.py && ruff format src/agent_hub/skill_graph/ tests/test_skill_graph.py`
+Run: `ruff check agent_hub/skill_graph/ tests/test_skill_graph.py && ruff format agent_hub/skill_graph/ tests/test_skill_graph.py`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hub/skill_graph/ tests/test_skill_graph.py
+git add agent_hub/skill_graph/ tests/test_skill_graph.py
 git commit -m "feat: implement SkillGraphService with resolve, expand, and seed"
 ```
 
@@ -527,8 +527,8 @@ git commit -m "feat: implement SkillGraphService with resolve, expand, and seed"
 ### Task 5: Integrate with domain.py — _skill_score expansion
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/domain.py:169-177` (`_skill_score`)
-- Modify: `src/agent_hub/agents/global_part_time/domain.py:179-217` (`score_match`)
+- Modify: `agent_hub/agents/global_part_time/domain.py:169-177` (`_skill_score`)
+- Modify: `agent_hub/agents/global_part_time/domain.py:179-217` (`score_match`)
 - Modify: `tests/test_domain.py`
 
 - [ ] **Step 1: Write failing tests for expanded _skill_score**
@@ -617,7 +617,7 @@ Expected: FAIL — `score_match` does not accept `expand_fn` parameter.
 
 - [ ] **Step 3: Modify _skill_score and score_match in domain.py**
 
-In `src/agent_hub/agents/global_part_time/domain.py`, replace `_skill_score` (lines 169-176):
+In `agent_hub/agents/global_part_time/domain.py`, replace `_skill_score` (lines 169-176):
 
 ```python
 def _skill_score(
@@ -714,7 +714,7 @@ Expected: All tests PASS, including original `DomainRulesTest` (backward compati
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py
+git add agent_hub/agents/global_part_time/domain.py tests/test_domain.py
 git commit -m "feat: add expand_fn support to _skill_score and score_match"
 ```
 
@@ -723,12 +723,12 @@ git commit -m "feat: add expand_fn support to _skill_score and score_match"
 ### Task 6: Wire SkillGraphService into service.py and app.py
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/service.py:209-255` (`run_matches`)
-- Modify: `src/agent_hub/app.py`
+- Modify: `agent_hub/agents/global_part_time/service.py:209-255` (`run_matches`)
+- Modify: `agent_hub/app.py`
 
 - [ ] **Step 1: Modify AgentService to accept an optional expand_fn**
 
-In `src/agent_hub/agents/global_part_time/service.py`, update `__init__` and `run_matches`:
+In `agent_hub/agents/global_part_time/service.py`, update `__init__` and `run_matches`:
 
 Change the constructor (line 35-36):
 
@@ -759,7 +759,7 @@ In `run_matches` (line 231), change the `score_match` call:
 
 - [ ] **Step 2: Modify app.py to create and inject SkillGraphService**
 
-In `src/agent_hub/app.py`, update `create_app` to optionally initialize the skill graph:
+In `agent_hub/app.py`, update `create_app` to optionally initialize the skill graph:
 
 Add import at top:
 
@@ -803,7 +803,7 @@ Expected: All PASS — without `NEO4J_URI` set, `expand_fn` is `None`, behavior 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/service.py src/agent_hub/app.py
+git add agent_hub/agents/global_part_time/service.py agent_hub/app.py
 git commit -m "feat: wire SkillGraphService into matching pipeline via expand_fn"
 ```
 
@@ -895,7 +895,7 @@ Expected: All tests PASS.
 
 - [ ] **Step 4: Run linter on all changed files**
 
-Run: `ruff check src/agent_hub/skill_graph/ src/agent_hub/agents/global_part_time/domain.py src/agent_hub/agents/global_part_time/service.py src/agent_hub/app.py tests/test_skill_graph.py tests/test_domain.py && ruff format src/agent_hub/skill_graph/ src/agent_hub/agents/global_part_time/domain.py src/agent_hub/agents/global_part_time/service.py src/agent_hub/app.py tests/test_skill_graph.py tests/test_domain.py`
+Run: `ruff check agent_hub/skill_graph/ agent_hub/agents/global_part_time/domain.py agent_hub/agents/global_part_time/service.py agent_hub/app.py tests/test_skill_graph.py tests/test_domain.py && ruff format agent_hub/skill_graph/ agent_hub/agents/global_part_time/domain.py agent_hub/agents/global_part_time/service.py agent_hub/app.py tests/test_skill_graph.py tests/test_domain.py`
 
 - [ ] **Step 5: Commit**
 

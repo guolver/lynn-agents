@@ -17,7 +17,7 @@
 ### Task 1: domain.py 完备度加权重构（TDD）
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/domain.py`
+- Modify: `agent_hub/agents/global_part_time/domain.py`
 - Test: `tests/test_domain.py`
 
 - [ ] **Step 1: 在 `tests/test_domain.py` 末尾追加新测试类**
@@ -341,11 +341,11 @@ Expected: 全部 PASS。
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py
+git add agent_hub/agents/global_part_time/domain.py tests/test_domain.py
 git commit -m "feat(matching): completeness-weighted scoring, drop neutral-score padding
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py
+Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- agent_hub/agents/global_part_time/domain.py tests/test_domain.py
 ```
 
 ---
@@ -387,8 +387,8 @@ Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- test
 ### Task 3: resume_summary 提取（TDD）
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/resume_parser.py`
-- Modify: `src/agent_hub/agents/global_part_time/http_api.py`（CandidateCreate）
+- Modify: `agent_hub/agents/global_part_time/resume_parser.py`
+- Modify: `agent_hub/agents/global_part_time/http_api.py`（CandidateCreate）
 - Create: `tests/test_resume_parser.py`
 
 - [ ] **Step 1: 写失败测试 `tests/test_resume_parser.py`**
@@ -483,11 +483,11 @@ Expected: PASS。
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/resume_parser.py src/agent_hub/agents/global_part_time/http_api.py tests/test_resume_parser.py
+git add agent_hub/agents/global_part_time/resume_parser.py agent_hub/agents/global_part_time/http_api.py tests/test_resume_parser.py
 git commit -m "feat(resume): extract resume_summary for semantic matching
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- src/agent_hub/agents/global_part_time/resume_parser.py src/agent_hub/agents/global_part_time/http_api.py tests/test_resume_parser.py
+Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- agent_hub/agents/global_part_time/resume_parser.py agent_hub/agents/global_part_time/http_api.py tests/test_resume_parser.py
 ```
 
 ---
@@ -495,7 +495,7 @@ Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- src/
 ### Task 4: build_candidate_text 追加简历概要（TDD）
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/embedding.py`
+- Modify: `agent_hub/agents/global_part_time/embedding.py`
 - Test: `tests/test_embedding.py`
 
 - [ ] **Step 1: 在 `tests/test_embedding.py` 末尾追加测试类**
@@ -554,11 +554,11 @@ Expected: 全部 PASS。
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/embedding.py tests/test_embedding.py
+git add agent_hub/agents/global_part_time/embedding.py tests/test_embedding.py
 git commit -m "feat(embedding): include resume summary in candidate text
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- src/agent_hub/agents/global_part_time/embedding.py tests/test_embedding.py
+Claude-Session: https://claude.ai/code/session_012fhZLk4jQRXeDcuCkx5H58" -- agent_hub/agents/global_part_time/embedding.py tests/test_embedding.py
 ```
 
 ---

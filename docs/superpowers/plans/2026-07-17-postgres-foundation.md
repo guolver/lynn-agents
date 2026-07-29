@@ -55,8 +55,8 @@
 
 **Files:**
 - Modify: `pyproject.toml`
-- Create: `src/agent_hub/database/__init__.py`
-- Create: `src/agent_hub/database/models.py`
+- Create: `agent_hub/database/__init__.py`
+- Create: `agent_hub/database/models.py`
 - Create: `alembic.ini`
 - Create: `alembic/env.py`
 - Create: `alembic/script.py.mako`
@@ -79,12 +79,12 @@
 ### Task 3: Extract the Repository Protocol and Implement PostgreSQL CRUD/Audit
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/repository.py`
-- Create: `src/agent_hub/database/repository.py`
-- Modify: `src/agent_hub/agents/global_part_time/service.py`
-- Modify: `src/agent_hub/agents/global_part_time/agent.py`
-- Modify: `src/agent_hub/agents/global_part_time/http_api.py`
-- Modify: `src/agent_hub/app.py`
+- Modify: `agent_hub/agents/global_part_time/repository.py`
+- Create: `agent_hub/database/repository.py`
+- Modify: `agent_hub/agents/global_part_time/service.py`
+- Modify: `agent_hub/agents/global_part_time/agent.py`
+- Modify: `agent_hub/agents/global_part_time/http_api.py`
+- Modify: `agent_hub/app.py`
 - Create: `tests/test_postgres_repository.py`
 
 **Interfaces:**
@@ -106,7 +106,7 @@
 ### Task 4: Make PostgreSQL Idempotency Transactional and Concurrency-Safe
 
 **Files:**
-- Modify: `src/agent_hub/database/repository.py`
+- Modify: `agent_hub/database/repository.py`
 - Modify: `tests/test_postgres_repository.py`
 - Create: `tests/test_postgres_concurrency.py`
 
@@ -126,8 +126,8 @@
 ### Task 5: Select the Repository at the Composition Root
 
 **Files:**
-- Create: `src/agent_hub/database/config.py`
-- Modify: `src/agent_hub/app.py`
+- Create: `agent_hub/database/config.py`
+- Modify: `agent_hub/app.py`
 - Modify: `tests/test_api.py`
 - Create: `tests/test_database_config.py`
 - Create: `tests/test_postgres_workflow.py`

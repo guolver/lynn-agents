@@ -16,12 +16,12 @@
 
 | File | Responsibility |
 |------|---------------|
-| `src/agent_hub/agents/global_part_time/chat_tools.py` | Tool definitions (JSON schema) + tool executor dispatch |
-| `src/agent_hub/agents/global_part_time/chat_service.py` | Session CRUD, message persistence, LLM streaming orchestration |
-| `src/agent_hub/database/models.py` | += ChatSession, ChatMessage models |
-| `src/agent_hub/database/repository.py` | += chat_session/chat_message kind handlers |
-| `src/agent_hub/agents/global_part_time/http_api.py` | += /chat/* routes |
-| `src/agent_hub/app.py` | Wire ChatService into app |
+| `agent_hub/agents/global_part_time/chat_tools.py` | Tool definitions (JSON schema) + tool executor dispatch |
+| `agent_hub/agents/global_part_time/chat_service.py` | Session CRUD, message persistence, LLM streaming orchestration |
+| `agent_hub/database/models.py` | += ChatSession, ChatMessage models |
+| `agent_hub/database/repository.py` | += chat_session/chat_message kind handlers |
+| `agent_hub/agents/global_part_time/http_api.py` | += /chat/* routes |
+| `agent_hub/app.py` | Wire ChatService into app |
 | `alembic/versions/20260718_0003_chat_tables.py` | Migration for chat_sessions + chat_messages |
 
 ### Frontend (new files)
@@ -51,7 +51,7 @@
 ## Task 1: Database Models + Migration
 
 **Files:**
-- Modify: `src/agent_hub/database/models.py` (add ChatSession, ChatMessage after line 464)
+- Modify: `agent_hub/database/models.py` (add ChatSession, ChatMessage after line 464)
 - Create: `alembic/versions/20260718_0003_chat_tables.py`
 
 - [ ] **Step 1: Add ChatSession and ChatMessage models to models.py**
@@ -166,7 +166,7 @@ Expected: Tables created successfully.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/agent_hub/database/models.py alembic/versions/20260718_0003_chat_tables.py
+git add agent_hub/database/models.py alembic/versions/20260718_0003_chat_tables.py
 git commit -m "feat(chat): add ChatSession and ChatMessage database models"
 ```
 
@@ -175,7 +175,7 @@ git commit -m "feat(chat): add ChatSession and ChatMessage database models"
 ## Task 2: Repository Chat Support
 
 **Files:**
-- Modify: `src/agent_hub/database/repository.py`
+- Modify: `agent_hub/database/repository.py`
 - Test: `tests/test_chat_repo.py`
 
 - [ ] **Step 1: Write failing test for chat session CRUD**
@@ -291,7 +291,7 @@ Expected: FAIL with `ValueError: unknown entity kind: chat_session`
 
 - [ ] **Step 3: Add chat_session and chat_message to repository**
 
-Modify `src/agent_hub/database/repository.py`:
+Modify `agent_hub/database/repository.py`:
 
 Add imports at the top (after existing model imports):
 
@@ -381,7 +381,7 @@ Expected: All tests PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/database/repository.py tests/test_chat_repo.py
+git add agent_hub/database/repository.py tests/test_chat_repo.py
 git commit -m "feat(chat): add chat_session and chat_message repository support"
 ```
 
@@ -390,7 +390,7 @@ git commit -m "feat(chat): add chat_session and chat_message repository support"
 ## Task 3: Chat Tools Definition + Executor
 
 **Files:**
-- Create: `src/agent_hub/agents/global_part_time/chat_tools.py`
+- Create: `agent_hub/agents/global_part_time/chat_tools.py`
 - Test: `tests/test_chat_tools.py`
 
 - [ ] **Step 1: Write failing test for tool executor**
@@ -467,7 +467,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'agent_hub.agents.glob
 
 - [ ] **Step 3: Implement chat_tools.py**
 
-Create `src/agent_hub/agents/global_part_time/chat_tools.py`:
+Create `agent_hub/agents/global_part_time/chat_tools.py`:
 
 ```python
 """Chat tool definitions and executor for DeepSeek function calling.
@@ -712,7 +712,7 @@ Expected: All tests PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/chat_tools.py tests/test_chat_tools.py
+git add agent_hub/agents/global_part_time/chat_tools.py tests/test_chat_tools.py
 git commit -m "feat(chat): add tool definitions and executor for function calling"
 ```
 
@@ -721,7 +721,7 @@ git commit -m "feat(chat): add tool definitions and executor for function callin
 ## Task 4: ChatService (LLM Orchestration + SSE Streaming)
 
 **Files:**
-- Create: `src/agent_hub/agents/global_part_time/chat_service.py`
+- Create: `agent_hub/agents/global_part_time/chat_service.py`
 - Test: `tests/test_chat_service.py`
 
 - [ ] **Step 1: Write failing test for ChatService**
@@ -819,7 +819,7 @@ Expected: FAIL with `ModuleNotFoundError`
 
 - [ ] **Step 3: Implement ChatService**
 
-Create `src/agent_hub/agents/global_part_time/chat_service.py`:
+Create `agent_hub/agents/global_part_time/chat_service.py`:
 
 ```python
 """Chat service: session management, message persistence, LLM streaming.
@@ -1117,7 +1117,7 @@ Expected: All tests PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/chat_service.py tests/test_chat_service.py
+git add agent_hub/agents/global_part_time/chat_service.py tests/test_chat_service.py
 git commit -m "feat(chat): add ChatService with LLM orchestration and SSE streaming"
 ```
 
@@ -1126,12 +1126,12 @@ git commit -m "feat(chat): add ChatService with LLM orchestration and SSE stream
 ## Task 5: Backend API Routes
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/http_api.py` (add chat routes)
-- Modify: `src/agent_hub/app.py` (wire ChatService)
+- Modify: `agent_hub/agents/global_part_time/http_api.py` (add chat routes)
+- Modify: `agent_hub/app.py` (wire ChatService)
 
 - [ ] **Step 1: Wire ChatService into app.py**
 
-In `src/agent_hub/app.py`, after line 78 (`part_time_service = AgentService(repo, expand_fn=expand_fn)`), add:
+In `agent_hub/app.py`, after line 78 (`part_time_service = AgentService(repo, expand_fn=expand_fn)`), add:
 
 ```python
     from .agents.global_part_time.chat_service import ChatService
@@ -1147,7 +1147,7 @@ After line 127 (`application.state.celery_app = celery_instance`), add:
 
 - [ ] **Step 2: Add chat routes to http_api.py**
 
-Add at the end of `src/agent_hub/agents/global_part_time/http_api.py` (after the `upload_resume` endpoint):
+Add at the end of `agent_hub/agents/global_part_time/http_api.py` (after the `upload_resume` endpoint):
 
 ```python
 # ---------------------------------------------------------------------------
@@ -1369,7 +1369,7 @@ Expected: JSON with `id`, `status: "active"`, `actor: "test-user"`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/http_api.py src/agent_hub/app.py
+git add agent_hub/agents/global_part_time/http_api.py agent_hub/app.py
 git commit -m "feat(chat): add chat API routes (sessions, messages SSE, upload)"
 ```
 

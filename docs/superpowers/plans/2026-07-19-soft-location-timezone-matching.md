@@ -20,14 +20,14 @@
 
 ## File Structure
 
-- Modify: `src/agent_hub/agents/global_part_time/domain.py` — 删除国家/时区硬过滤并更新规则版本；保留现有软评分实现。
+- Modify: `agent_hub/agents/global_part_time/domain.py` — 删除国家/时区硬过滤并更新规则版本；保留现有软评分实现。
 - Modify: `tests/test_domain.py` — 覆盖硬过滤行为和地区/时区排序差异。
 - Modify: `tests/test_service.py` — 覆盖完整匹配用例，证明不匹配地区/时区的职位仍产生 match。
 
 ### Task 1: 将国家和时区改为软评分条件
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/domain.py:18,165-207`
+- Modify: `agent_hub/agents/global_part_time/domain.py:18,165-207`
 - Test: `tests/test_domain.py`
 - Test: `tests/test_service.py`
 
@@ -119,7 +119,7 @@ Expected: 三个测试因 `hard_filter()` 仍返回 `country_mismatch` / `timezo
 
 - [ ] **Step 4: 实现最小领域规则修改**
 
-在 `src/agent_hub/agents/global_part_time/domain.py` 把规则版本更新为：
+在 `agent_hub/agents/global_part_time/domain.py` 把规则版本更新为：
 
 ```python
 RULE_VERSION = "2026-07-19.1"
@@ -170,14 +170,14 @@ Run:
 
 ```bash
 git diff --check
-git diff -- src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py tests/test_service.py
+git diff -- agent_hub/agents/global_part_time/domain.py tests/test_domain.py tests/test_service.py
 git status --short
 ```
 
 确认只包含本任务文件后执行：
 
 ```bash
-git add src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py tests/test_service.py
-git commit --only src/agent_hub/agents/global_part_time/domain.py tests/test_domain.py tests/test_service.py \
+git add agent_hub/agents/global_part_time/domain.py tests/test_domain.py tests/test_service.py
+git commit --only agent_hub/agents/global_part_time/domain.py tests/test_domain.py tests/test_service.py \
   -m "fix: make location and timezone matching soft"
 ```

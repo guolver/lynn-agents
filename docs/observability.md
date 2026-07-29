@@ -1,6 +1,6 @@
 # LLM 可观测性：Langfuse 追踪
 
-> 模块：`src/agent_hub/observability.py`，埋点位置：`chat_service.stream_response`。
+> 模块：`agent_hub/observability.py`，埋点位置：`chat_service.stream_response`。
 > 把对话 Agent 的每轮 LLM 调用、工具执行、token 用量上报 Langfuse，用于调试、成本核算与质量分析。
 
 ## 追踪结构

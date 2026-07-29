@@ -27,7 +27,7 @@ dev-web: ## 启动前端 (Next.js)
 lint: lint-py lint-fe ## 全量代码检查
 
 lint-py: ## Python lint (ruff)
-	. .venv/bin/activate && ruff check src/ tests/
+	. .venv/bin/activate && ruff check agent_hub/ tests/
 
 lint-fe: ## 前端 lint (eslint)
 	cd frontend && pnpm lint
@@ -77,8 +77,8 @@ migrate: ## 应用数据库迁移
 		alembic upgrade head
 
 format: ## 格式化代码
-	. .venv/bin/activate && ruff format src/ tests/
-	. .venv/bin/activate && ruff check --fix src/ tests/
+	. .venv/bin/activate && ruff format agent_hub/ tests/
+	. .venv/bin/activate && ruff check --fix agent_hub/ tests/
 
 # — 清理 ————————————————————————————————————
 

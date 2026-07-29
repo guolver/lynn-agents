@@ -211,11 +211,11 @@ Displayed inline in assistant messages when matches are returned:
 ### Backend
 
 ```
-src/agent_hub/agents/global_part_time/
+agent_hub/agents/global_part_time/
   chat_service.py      # ChatService: session CRUD, LLM orchestration, SSE streaming
   chat_tools.py        # Tool definitions, tool executor dispatch
 
-src/agent_hub/database/
+agent_hub/database/
   models.py            # += ChatSession, ChatMessage SQLAlchemy models
   repository.py        # += chat_session / chat_message kind handlers
 ```

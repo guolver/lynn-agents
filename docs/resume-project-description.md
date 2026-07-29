@@ -312,16 +312,16 @@ Docker 构建在代理网络环境下反复失败：容器内直连 PyPI/镜像�
 | 主张 | 代码/文档位置 |
 |---|---|
 | 召回评测数字 | `docs/recall-eval-report.md` + `scripts/eval_recall.py`（可复现） |
-| pgvector 召回 | `src/agent_hub/agents/global_part_time/service.py` run_matches；`src/agent_hub/database/repository.py` search_jobs_by_embedding |
+| pgvector 召回 | `agent_hub/agents/global_part_time/service.py` run_matches；`agent_hub/database/repository.py` search_jobs_by_embedding |
 | 向量列与索引 | `alembic/versions/20260718_0004_job_embedding.py`（vector(1024) + HNSW） |
 | 检索证据落库 | match 记录 `retrieval` 字段（method/similarity/rank/recall_size） |
-| 技能图谱 | `src/agent_hub/skill_graph/`（Neo4j，ALIAS_OF/CHILD_OF/expand） |
-| Agent 受控调用 | `src/agent_hub/core/contracts.py`（RiskLevel/幂等键）、`api/platform.py` |
-| 流水线与重试 | `src/agent_hub/worker/`（错误分类、指数退避、workflow 追踪） |
+| 技能图谱 | `agent_hub/skill_graph/`（Neo4j，ALIAS_OF/CHILD_OF/expand） |
+| Agent 受控调用 | `agent_hub/core/contracts.py`（RiskLevel/幂等键）、`api/platform.py` |
+| 流水线与重试 | `agent_hub/worker/`（错误分类、指数退避、workflow 追踪） |
 | 混合引擎设计 | `docs/superpowers/specs/2026-07-18-pgvector-recall-design.md` |
-| LLM 对话 Agent Loop | `src/agent_hub/agents/global_part_time/chat_service.py`（逐段导读见 `docs/chat-agent-loop-explained.md`） |
-| MCP Server（受控动作对外暴露） | `src/agent_hub/mcp_server.py` + `docs/mcp-server.md` |
+| LLM 对话 Agent Loop | `agent_hub/agents/global_part_time/chat_service.py`（逐段导读见 `docs/chat-agent-loop-explained.md`） |
+| MCP Server（受控动作对外暴露） | `agent_hub/mcp_server.py` + `docs/mcp-server.md` |
 | Agent 工具选择评测 | `scripts/eval_agent_tools.py` + `docs/agent-tool-eval-report.md`（提示词迭代 68.9%→92.2%，可复现） |
-| LLM 可观测性（Langfuse） | `src/agent_hub/observability.py` + `docs/observability.md`（每轮调用/工具/token 用量追踪，no-op 降级） |
-| 系统架构与分层 | 本文档"系统架构"节；组装入口 `src/agent_hub/app.py`（create_app 显式装配）；平台核心 `src/agent_hub/core/`；详细版 `docs/system-architecture.md` |
-| 多租户 RBAC / 资源归属 | `src/agent_hub/core/security.py`（IdentityMiddleware、Principal、require_roles）；service 层归属校验（`_owned_candidate`/`_owned_session` 等）；越权修复见提交 `de8bd8f`、`1bc04ff` |
+| LLM 可观测性（Langfuse） | `agent_hub/observability.py` + `docs/observability.md`（每轮调用/工具/token 用量追踪，no-op 降级） |
+| 系统架构与分层 | 本文档"系统架构"节；组装入口 `agent_hub/app.py`（create_app 显式装配）；平台核心 `agent_hub/core/`；详细版 `docs/system-architecture.md` |
+| 多租户 RBAC / 资源归属 | `agent_hub/core/security.py`（IdentityMiddleware、Principal、require_roles）；service 层归属校验（`_owned_candidate`/`_owned_session` 等）；越权修复见提交 `de8bd8f`、`1bc04ff` |

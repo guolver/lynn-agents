@@ -18,11 +18,11 @@
 
 ## Part 2 · 代码清除
 
-- `src/agent_hub/agents/global_part_time/repository.py`：删除 `SQLiteRepository`、`Repository = SQLiteRepository` 别名、`sqlite3`/`SCHEMA` 等实现残留；仅保留 `RepositoryProtocol`；更新模块 docstring
+- `agent_hub/agents/global_part_time/repository.py`：删除 `SQLiteRepository`、`Repository = SQLiteRepository` 别名、`sqlite3`/`SCHEMA` 等实现残留；仅保留 `RepositoryProtocol`；更新模块 docstring
 - 新增 `tests/inmemory_repo.py`：`InMemoryRepository`（dict 存储）实现完整协议；语义对齐 SQLite 版：存取经 JSON 往返快照（隔离外部突变）、`list` 按 created_at 倒序、`list_by_session` 升序、`audits` 按插入序倒序且 `min(limit,1000)`、`idempotent` 先查后执行；构造函数接受并忽略可选 path 参数（兼容 `Repository(":memory:")` 调用点，测试只需改 import）
 - `tests/test_repository_contract.py`：契约测试的内存侧改为针对 `InMemoryRepository`（Postgres 侧不变）
 - 波及测试改 import：`test_service`、`test_api`、`test_app_skill_graph_lifecycle`、`test_remotive_fetcher`、`test_remoteok_fetcher`、`test_celery_tasks`（SQLiteRepository→InMemoryRepository）
-- `src/agent_hub/database/config.py`：工厂仅接受 `DATABASE_URL`（参数或环境变量），缺失时 `raise RuntimeError`，删除 `DATABASE_PATH`/SQLite 分支；`tests/test_database_config.py` 相应重写
+- `agent_hub/database/config.py`：工厂仅接受 `DATABASE_URL`（参数或环境变量），缺失时 `raise RuntimeError`，删除 `DATABASE_PATH`/SQLite 分支；`tests/test_database_config.py` 相应重写
 - `.env`：新增 `DATABASE_URL=postgresql+psycopg://agent_hub:agent_hub@localhost:5432/agent_hub`（宿主机裸跑仍可用），删除注释的 `DATABASE_PATH` 行；`.env.example` 同步
 - 删除 `scripts/migrate_sqlite_to_pg.py`（历史使命完成）
 - `CLAUDE.md` 技术栈表数据库行：`PostgreSQL + pgvector`，删除 SQLite 字样

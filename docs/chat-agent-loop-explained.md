@@ -1,6 +1,6 @@
 # 逐段读懂 chat_service.py 的 Agent Loop
 
-> 零基础代码导读。对象：`src/agent_hub/agents/global_part_time/chat_service.py`（约 450 行）与配套的 `chat_tools.py`。建议对照源码阅读，行号以 2026-07 版本为准。
+> 零基础代码导读。对象：`agent_hub/agents/global_part_time/chat_service.py`（约 450 行）与配套的 `chat_tools.py`。建议对照源码阅读，行号以 2026-07 版本为准。
 
 ## 0. 先建立心智模型：LLM 只会"说话"，不会"做事"
 

@@ -7,7 +7,7 @@ Agent Hub 将“平台能力”和“业务 Agent”分开：平台只负责发�
 内置 Agent 放在：
 
 ```text
-src/agent_hub/agents/<agent_name>/
+agent_hub/agents/<agent_name>/
 ├── __init__.py
 ├── agent.py          # 平台适配器：manifest、actions、invoke
 ├── domain.py         # 无框架依赖的领域规则（可选）

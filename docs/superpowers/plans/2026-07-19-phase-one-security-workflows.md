@@ -23,17 +23,17 @@
 
 ## Planned File Structure
 
-- `src/agent_hub/core/security.py`: Principal, security settings, gateway authentication, RBAC dependencies.
-- `src/agent_hub/core/contracts.py`: ExecutionContext compatibility bridge to Principal.
-- `src/agent_hub/database/models.py`: tenant/owner columns and workflow command models.
-- `src/agent_hub/database/repository.py`: tenant-scoped repository and command persistence.
-- `src/agent_hub/agents/global_part_time/repository.py`: root/scoped repository protocols.
-- `src/agent_hub/agents/global_part_time/service.py`: principal-aware service factory and owner checks.
-- `src/agent_hub/agents/global_part_time/chat_service.py`: tenant/owner-safe chat operations.
-- `src/agent_hub/worker/definitions.py`: workflow payload models and registry.
-- `src/agent_hub/worker/dispatcher.py`: idempotent command submission and redispatch.
-- `src/agent_hub/api/workflows.py`: tenant-aware workflow list/detail/retry routes.
-- `src/agent_hub/agents/global_part_time/http_api.py`: RBAC and dispatcher wiring.
+- `agent_hub/core/security.py`: Principal, security settings, gateway authentication, RBAC dependencies.
+- `agent_hub/core/contracts.py`: ExecutionContext compatibility bridge to Principal.
+- `agent_hub/database/models.py`: tenant/owner columns and workflow command models.
+- `agent_hub/database/repository.py`: tenant-scoped repository and command persistence.
+- `agent_hub/agents/global_part_time/repository.py`: root/scoped repository protocols.
+- `agent_hub/agents/global_part_time/service.py`: principal-aware service factory and owner checks.
+- `agent_hub/agents/global_part_time/chat_service.py`: tenant/owner-safe chat operations.
+- `agent_hub/worker/definitions.py`: workflow payload models and registry.
+- `agent_hub/worker/dispatcher.py`: idempotent command submission and redispatch.
+- `agent_hub/api/workflows.py`: tenant-aware workflow list/detail/retry routes.
+- `agent_hub/agents/global_part_time/http_api.py`: RBAC and dispatcher wiring.
 - `frontend/lib/agent-hub-api.ts`: centralized BFF identity forwarding.
 - `frontend/app/api/chat/sessions/route.ts`: use the centralized client for chat collection calls.
 - `frontend/app/api/chat/sessions/[id]/route.ts`,
@@ -123,10 +123,10 @@ git commit -m "test: make pytest collection and neo4j fixtures reliable"
 ### Task 2: Add Principal Authentication and RBAC Primitives
 
 **Files:**
-- Create: `src/agent_hub/core/security.py`
-- Modify: `src/agent_hub/core/contracts.py:50-62`
-- Modify: `src/agent_hub/core/registry.py:67-91`
-- Modify: `src/agent_hub/app.py:36-174`
+- Create: `agent_hub/core/security.py`
+- Modify: `agent_hub/core/contracts.py:50-62`
+- Modify: `agent_hub/core/registry.py:67-91`
+- Modify: `agent_hub/app.py:36-174`
 - Test: `tests/test_security.py`
 
 **Interfaces:**
@@ -192,7 +192,7 @@ Expected: FAIL because `agent_hub.core.security` does not exist.
 - [ ] **Step 3: Implement the immutable security types and settings**
 
 ```python
-# src/agent_hub/core/security.py
+# agent_hub/core/security.py
 class Role(str, Enum):
     ADMIN = "admin"
     OPERATOR = "operator"
@@ -290,14 +290,14 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/agent_hub/core/security.py src/agent_hub/core/contracts.py src/agent_hub/core/registry.py src/agent_hub/app.py tests/test_security.py tests/test_platform.py
+git add agent_hub/core/security.py agent_hub/core/contracts.py agent_hub/core/registry.py agent_hub/app.py tests/test_security.py tests/test_platform.py
 git commit -m "feat: add trusted gateway principal and rbac primitives"
 ```
 
 ### Task 3: Add Tenant and Workflow Command Schema
 
 **Files:**
-- Modify: `src/agent_hub/database/models.py`
+- Modify: `agent_hub/database/models.py`
 - Create: `alembic/versions/20260719_0007_tenant_security_workflow_commands.py`
 - Modify: `tests/test_database_models.py`
 - Test: `tests/test_tenant_migration.py`
@@ -390,15 +390,15 @@ Expected: PASS; migration test skips only when `TEST_DATABASE_URL` is absent.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hub/database/models.py alembic/versions/20260719_0007_tenant_security_workflow_commands.py tests/test_database_models.py tests/test_tenant_migration.py
+git add agent_hub/database/models.py alembic/versions/20260719_0007_tenant_security_workflow_commands.py tests/test_database_models.py tests/test_tenant_migration.py
 git commit -m "feat: add tenant and workflow command schema"
 ```
 
 ### Task 4: Introduce Tenant-Scoped Repositories
 
 **Files:**
-- Modify: `src/agent_hub/agents/global_part_time/repository.py`
-- Modify: `src/agent_hub/database/repository.py`
+- Modify: `agent_hub/agents/global_part_time/repository.py`
+- Modify: `agent_hub/database/repository.py`
 - Modify: `tests/inmemory_repo.py`
 - Modify: `tests/test_repository_contract.py`
 - Test: `tests/test_tenant_repository.py`
@@ -478,19 +478,19 @@ Expected: in-memory tests PASS; PostgreSQL tests PASS with `TEST_DATABASE_URL` o
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hub/agents/global_part_time/repository.py src/agent_hub/database/repository.py tests/inmemory_repo.py tests/test_repository_contract.py tests/test_tenant_repository.py
+git add agent_hub/agents/global_part_time/repository.py agent_hub/database/repository.py tests/inmemory_repo.py tests/test_repository_contract.py tests/test_tenant_repository.py
 git commit -m "feat: isolate repository operations by tenant"
 ```
 
 ### Task 5: Enforce RBAC and Chat/Candidate Ownership
 
 **Files:**
-- Modify: `src/agent_hub/api/platform.py`
-- Modify: `src/agent_hub/agents/global_part_time/http_api.py`
-- Modify: `src/agent_hub/agents/global_part_time/service.py`
-- Modify: `src/agent_hub/agents/global_part_time/chat_service.py`
-- Modify: `src/agent_hub/agents/global_part_time/agent.py`
-- Modify: `src/agent_hub/app.py`
+- Modify: `agent_hub/api/platform.py`
+- Modify: `agent_hub/agents/global_part_time/http_api.py`
+- Modify: `agent_hub/agents/global_part_time/service.py`
+- Modify: `agent_hub/agents/global_part_time/chat_service.py`
+- Modify: `agent_hub/agents/global_part_time/agent.py`
+- Modify: `agent_hub/app.py`
 - Test: `tests/test_rbac_api.py`
 - Test: `tests/test_chat_ownership.py`
 
@@ -589,15 +589,15 @@ Expected: PASS in development mode; trusted gateway cases reject forged headers.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/agent_hub/api/platform.py src/agent_hub/agents/global_part_time/http_api.py src/agent_hub/agents/global_part_time/service.py src/agent_hub/agents/global_part_time/chat_service.py src/agent_hub/agents/global_part_time/agent.py src/agent_hub/app.py tests/test_rbac_api.py tests/test_chat_ownership.py tests/test_api.py tests/test_chat_service.py
+git add agent_hub/api/platform.py agent_hub/agents/global_part_time/http_api.py agent_hub/agents/global_part_time/service.py agent_hub/agents/global_part_time/chat_service.py agent_hub/agents/global_part_time/agent.py agent_hub/app.py tests/test_rbac_api.py tests/test_chat_ownership.py tests/test_api.py tests/test_chat_service.py
 git commit -m "feat: enforce tenant rbac and resource ownership"
 ```
 
 ### Task 6: Define Every Recoverable Workflow Declaratively
 
 **Files:**
-- Create: `src/agent_hub/worker/definitions.py`
-- Modify: `src/agent_hub/worker/tasks.py`
+- Create: `agent_hub/worker/definitions.py`
+- Modify: `agent_hub/worker/tasks.py`
 - Test: `tests/test_workflow_definitions.py`
 
 **Interfaces:**
@@ -680,16 +680,16 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_hub/worker/definitions.py src/agent_hub/worker/tasks.py tests/test_workflow_definitions.py tests/test_celery_tasks.py
+git add agent_hub/worker/definitions.py agent_hub/worker/tasks.py tests/test_workflow_definitions.py tests/test_celery_tasks.py
 git commit -m "feat: register recoverable workflow definitions"
 ```
 
 ### Task 7: Persist Idempotent Workflow Commands and Dispatch Them
 
 **Files:**
-- Create: `src/agent_hub/worker/dispatcher.py`
-- Modify: `src/agent_hub/worker/workflow.py`
-- Modify: `src/agent_hub/database/repository.py`
+- Create: `agent_hub/worker/dispatcher.py`
+- Modify: `agent_hub/worker/workflow.py`
+- Modify: `agent_hub/database/repository.py`
 - Modify: `tests/inmemory_repo.py`
 - Test: `tests/test_workflow_dispatcher.py`
 - Test: `tests/test_postgres_command_concurrency.py`
@@ -787,16 +787,16 @@ Expected: unit tests PASS; PostgreSQL concurrency tests PASS with `TEST_DATABASE
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/agent_hub/worker/dispatcher.py src/agent_hub/worker/workflow.py src/agent_hub/worker/tasks.py src/agent_hub/worker/celery_app.py src/agent_hub/database/repository.py tests/inmemory_repo.py tests/test_workflow_dispatcher.py tests/test_postgres_command_concurrency.py
+git add agent_hub/worker/dispatcher.py agent_hub/worker/workflow.py agent_hub/worker/tasks.py agent_hub/worker/celery_app.py agent_hub/database/repository.py tests/inmemory_repo.py tests/test_workflow_dispatcher.py tests/test_postgres_command_concurrency.py
 git commit -m "feat: submit asynchronous workflows idempotently"
 ```
 
 ### Task 8: Wire Async APIs and Declarative Manual Retry
 
 **Files:**
-- Create: `src/agent_hub/api/workflows.py`
-- Modify: `src/agent_hub/agents/global_part_time/http_api.py`
-- Modify: `src/agent_hub/app.py`
+- Create: `agent_hub/api/workflows.py`
+- Modify: `agent_hub/agents/global_part_time/http_api.py`
+- Modify: `agent_hub/app.py`
 - Test: `tests/test_async_idempotency_api.py`
 - Test: `tests/test_workflow_retry_api.py`
 
@@ -866,7 +866,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/agent_hub/api/workflows.py src/agent_hub/agents/global_part_time/http_api.py src/agent_hub/app.py tests/test_async_idempotency_api.py tests/test_workflow_retry_api.py tests/test_api.py
+git add agent_hub/api/workflows.py agent_hub/agents/global_part_time/http_api.py agent_hub/app.py tests/test_async_idempotency_api.py tests/test_workflow_retry_api.py tests/test_api.py
 git commit -m "feat: wire idempotent async APIs and workflow retry"
 ```
 
@@ -884,7 +884,7 @@ git commit -m "feat: wire idempotent async APIs and workflow retry"
 - Modify: `frontend/app/api/jobs/categories/route.ts`
 - Modify: `frontend/app/api/jobs/[id]/route.ts`
 - Modify: `frontend/app/api/jobs/[id]/translate/route.ts`
-- Modify: `src/agent_hub/mcp_server.py`
+- Modify: `agent_hub/mcp_server.py`
 - Modify: `frontend/.env.example`
 - Modify: `.env.example`
 - Test: `frontend/tests/agent-hub-api.test.mjs`
@@ -956,7 +956,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/lib/agent-hub-api.ts frontend/app/api frontend/tests/agent-hub-api.test.mjs frontend/.env.example .env.example src/agent_hub/mcp_server.py tests/test_mcp_server.py
+git add frontend/lib/agent-hub-api.ts frontend/app/api frontend/tests/agent-hub-api.test.mjs frontend/.env.example .env.example agent_hub/mcp_server.py tests/test_mcp_server.py
 git commit -m "feat: forward trusted identity through bff and mcp"
 ```
 
@@ -1040,7 +1040,7 @@ Expected: production build exits 0.
 
 Run: `git diff --check`
 
-Run: `rg -n "chat-user|X-Actor.*Header|\.delay\(" frontend/app/api src/agent_hub/agents/global_part_time/http_api.py`
+Run: `rg -n "chat-user|X-Actor.*Header|\.delay\(" frontend/app/api agent_hub/agents/global_part_time/http_api.py`
 
 Expected: no hard-coded `chat-user`; HTTP identity comes from Principal; no protected async route directly dispatches `.delay()`.
 

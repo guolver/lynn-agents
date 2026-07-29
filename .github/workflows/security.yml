@@ -24,7 +24,7 @@ jobs:
         run: pip install bandit[toml]
 
       - name: Run bandit
-        run: bandit -c pyproject.toml -r src/
+        run: bandit -c pyproject.toml -r agent_hub/
 
   npm-audit:
     name: Frontend Dependency Audit
